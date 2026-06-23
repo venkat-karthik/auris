@@ -11,7 +11,9 @@ from loguru import logger
 from app.core.config import APP_NAME, APP_VERSION, CORS_ORIGINS, DEBUG
 from app.routes.agents import router as agents_router
 from app.routes.auth import router as auth_router
+from app.routes.billing import router as billing_router
 from app.routes.calls import router as calls_router
+from app.routes.telephony import router as telephony_router
 
 
 @asynccontextmanager
@@ -46,6 +48,8 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(agents_router, prefix=API_PREFIX)
 app.include_router(calls_router, prefix=API_PREFIX)
+app.include_router(telephony_router, prefix=API_PREFIX)
+app.include_router(billing_router, prefix=API_PREFIX)
 
 
 @app.get("/api/v1/health")
