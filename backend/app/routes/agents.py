@@ -2,7 +2,21 @@
 Auris - Agent CRUD routes
 """
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class AgentResponse(BaseModel):
+    id: int
+    org_id: int
+    name: str
+    description: str | None
+    graph: dict
+    model_config_data: dict = Field(..., alias="model_config")
+    context_variables: dict
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,17 +45,7 @@ class AgentUpdate(BaseModel):
     context_variables: dict | None = None
 
 
-class AgentResponse(BaseModel):
-    id: int
-    org_id: int
-    name: str
-    description: str | None
-    graph: dict
-    model_config: dict
-    context_variables: dict
 
-    class Config:
-        from_attributes = True
 
 
 @router.post("", response_model=AgentResponse, status_code=201)

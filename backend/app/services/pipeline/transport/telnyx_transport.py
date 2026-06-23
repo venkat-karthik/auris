@@ -58,4 +58,3 @@ class TelnyxTransport:
         pcm_8k = b"".join([pcm_data[i:i+2] for i in range(0, len(pcm_data), 4)])
         ulaw = cls.pcm_to_ulaw(pcm_8k)
         await websocket.send_bytes(ulaw)
-"

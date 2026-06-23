@@ -1,12 +1,12 @@
 from fastapi import APIRouter, WebSocket, Query, HTTPException, Depends
-from app.dependencies.auth import get_current_user, get_current_org
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+import asyncio
+
 from app.services.pipeline.transport.telnyx_transport import TelnyxTransport
 from app.services.pipeline.factory import build_pipeline
-import asyncio
 from app.services.pipeline.frame import audio_in, FrameType
 from app.models.agent import Agent
-from sqlalchemy.orm import Session
-from sqlalchemy import select
 from app.core.database import get_db
 
 router = APIRouter()
@@ -15,17 +15,20 @@ router = APIRouter()
 async def telnyx_ws(
     websocket: WebSocket,
     call_control_id: str = Query(..., description="Telnyx call control ID"),
-    user=Depends(get_current_user),
-    org=Depends(get_current_org),
-    db: Session = Depends(get_db),
+    org_id: int = Query(..., description="Organization ID"),
+    agent_id: int = Query(..., description="Agent ID"),
+    db: AsyncSession = Depends(get_db),
 ):
     await websocket.accept()
-    # Retrieve the agent for this organization (fallback to first)
-    result = await db.execute(select(Agent).where(Agent.org_id == org.id))
+    # Retrieve the agent for this organization
+    result = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
+    )
     agent = result.scalars().first()
     if not agent:
         await websocket.close(code=1008)
         raise HTTPException(status_code=404, detail="Agent not found for organization")
+    
     # Build pipeline based on agent config
     pipeline = build_pipeline(agent.model_config, system_prompt=agent.description or "", language="en")
     await pipeline.start()
@@ -44,11 +47,11 @@ async def telnyx_ws(
 @router.post("/telephony/inbound/telnyx")
 async def inbound_telnyx(
     call_control_id: str = Query(...),
-    org=Depends(get_current_org),
-    user=Depends(get_current_user),
+    org_id: int = Query(...),
+    agent_id: int = Query(...),
 ):
-    # Placeholder: return TeXML that tells Telnyx to connect to the WS endpoint
-    ws_url = f"wss://{org.id}.example.com/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}"
+    ws_url = f"wss://api.example.com/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}&org_id={org_id}&agent_id={agent_id}"
     return {
         "texml": f"<Response><Connect><WebSocket url='{ws_url}'/></Connect></Response>"
     }
+
