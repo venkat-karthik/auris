@@ -1,0 +1,57 @@
+"""
+Auris - Main FastAPI Application
+100% written from scratch.
+"""
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
+
+from app.core.config import APP_NAME, APP_VERSION, CORS_ORIGINS, DEBUG
+from app.routes.agents import router as agents_router
+from app.routes.auth import router as auth_router
+from app.routes.calls import router as calls_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
+    yield
+    logger.info(f"Shutting down {APP_NAME}")
+
+
+app = FastAPI(
+    title=f"{APP_NAME} API",
+    description="Auris Voice AI Platform — built from scratch",
+    version=APP_VERSION,
+    debug=DEBUG,
+    openapi_url="/api/v1/openapi.json",
+    docs_url="/api/v1/docs",
+    lifespan=lifespan,
+)
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+API_PREFIX = "/api/v1"
+
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(agents_router, prefix=API_PREFIX)
+app.include_router(calls_router, prefix=API_PREFIX)
+
+
+@app.get("/api/v1/health")
+async def health():
+    return {
+        "status": "ok",
+        "service": APP_NAME,
+        "version": APP_VERSION,
+    }
