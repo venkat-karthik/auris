@@ -15,20 +15,13 @@ import asyncio
 from typing import AsyncGenerator
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-
-# Import our FastAPI app and db dependencies
-from app.main import app
-from app.core.database import Base, get_db
-from app.models.user import User
-from app.models.organization import Organization, OrgMember
-from app.models.agent import Agent
-from app.models.billing import CreditTransaction
-from app.core.security import hash_password, create_access_token
+from sqlalchemy.pool import StaticPool
 
 # Create async engine for memory SQLite DB
 engine = create_async_engine(
     "sqlite+aiosqlite:///:memory:",
-    connect_args={"check_same_thread": False}
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool
 )
 TestingSessionLocal = async_sessionmaker(
     bind=engine,
@@ -38,7 +31,20 @@ TestingSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
-@pytest.fixture(scope="session", autouse=True)
+# Patch AsyncSessionLocal before importing main app routes so they use our test engine
+import app.core.database
+app.core.database.AsyncSessionLocal = TestingSessionLocal
+
+# Now safely import our FastAPI app and db dependencies
+from app.main import app
+from app.core.database import Base, get_db
+from app.models.user import User
+from app.models.organization import Organization, OrgMember
+from app.models.agent import Agent
+from app.models.billing import CreditTransaction
+from app.core.security import hash_password, create_access_token
+
+@pytest.fixture(autouse=True)
 async def setup_db():
     # Create tables
     async with engine.begin() as conn:
@@ -49,7 +55,7 @@ async def setup_db():
         await conn.run_sync(Base.metadata.drop_all)
 
 @pytest.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+async def db_session(setup_db) -> AsyncGenerator[AsyncSession, None]:
     async with TestingSessionLocal() as session:
         try:
             yield session

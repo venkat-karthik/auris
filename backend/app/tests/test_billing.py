@@ -142,6 +142,6 @@ async def test_razorpay_webhook_success(client: AsyncClient, db_session: AsyncSe
         assert ct.status == "completed"
         assert ct.razorpay_payment_id == "pay_webhook123"
 
-        # Check Org balance updated (200 + 50 = 250)
+        # Check Org balance updated (100 + 50 = 150)
         await db_session.refresh(test_org)
-        assert test_org.balance_credits == 250.0
+        assert test_org.balance_credits == 150.0

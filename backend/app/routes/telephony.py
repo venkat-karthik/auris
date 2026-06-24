@@ -2,12 +2,15 @@ from fastapi import APIRouter, WebSocket, Query, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import asyncio
+from datetime import UTC, datetime
+from loguru import logger
 
 from app.services.pipeline.transport.telnyx_transport import TelnyxTransport
 from app.services.pipeline.factory import build_pipeline
 from app.services.pipeline.frame import audio_in, FrameType
 from app.models.agent import Agent
-from app.core.database import get_db
+from app.models.call_run import CallRun
+from app.core.database import get_db, AsyncSessionLocal
 
 router = APIRouter()
 
@@ -17,6 +20,8 @@ async def telnyx_ws(
     call_control_id: str = Query(..., description="Telnyx call control ID"),
     org_id: int = Query(..., description="Organization ID"),
     agent_id: int = Query(..., description="Agent ID"),
+    from_number: str | None = Query(None, alias="from", description="Caller phone number"),
+    to_number: str | None = Query(None, alias="to", description="Called phone number"),
     db: AsyncSession = Depends(get_db),
 ):
     await websocket.accept()
@@ -29,19 +34,121 @@ async def telnyx_ws(
         await websocket.close(code=1008)
         raise HTTPException(status_code=404, detail="Agent not found for organization")
     
+    # Look up repeat caller info for prompt injection
+    from app.services.customer_memory import lookup_customer
+    customer_context = await lookup_customer(db, org_id, from_number)
+    
+    # Create call run record
+    run = CallRun(
+        org_id=org_id,
+        agent_id=agent.id,
+        transport="telnyx",
+        call_type="inbound",
+        status="running",
+        caller_number=from_number,
+        called_number=to_number,
+        started_at=datetime.now(UTC),
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    run_id = run.id
+
+    system_prompt = agent.description or ""
+    if customer_context:
+        system_prompt += customer_context
+
+    language = agent.model_config.get("language", "en")
+    
     # Build pipeline based on agent config
-    pipeline = build_pipeline(agent.model_config, system_prompt=agent.description or "", language="en")
+    pipeline = build_pipeline(agent.model_config, system_prompt=system_prompt, language=language)
+    
+    transcript_segments = []
+
+    async def collecting_wrapper():
+        frame = await pipeline.collect()
+        if frame:
+            if frame.type == FrameType.STT_TRANSCRIPT:
+                data = frame.data or {}
+                if data.get("is_final"):
+                    text = data.get("text", "").strip()
+                    if text:
+                        transcript_segments.append(f"User: {text}")
+            elif frame.type == FrameType.LLM_TEXT_COMPLETE:
+                data = frame.data or {}
+                text = data.get("text", "").strip()
+                if text:
+                    transcript_segments.append(f"Agent: {text}")
+        return frame
+
+    start_time = datetime.now(UTC)
+
+    async def receive_loop():
+        try:
+            async for pcm_chunk in TelnyxTransport.receive_ulaw(websocket):
+                await pipeline.push(audio_in(pcm_chunk))
+        except Exception as e:
+            logger.info(f"Telnyx receive loop ended/disconnected: {e}")
+
+    async def send_loop():
+        try:
+            while True:
+                out_frame = await collecting_wrapper()
+                if out_frame is None:
+                    break
+                if out_frame.type == FrameType.AUDIO_OUT:
+                    await TelnyxTransport.send_pcm(websocket, out_frame.data)
+                elif out_frame.type == FrameType.CALL_END:
+                    break
+        except Exception as e:
+            logger.info(f"Telnyx send loop ended/disconnected: {e}")
+
     await pipeline.start()
     try:
-        async for pcm_chunk in TelnyxTransport.receive_ulaw(websocket):
-            # Push incoming audio into pipeline
-            await pipeline.push(audio_in(pcm_chunk))
-            # Collect any output frame (blocking until available)
-            out_frame = await pipeline.collect()
-            if out_frame and out_frame.type == FrameType.AUDIO_OUT:
-                await TelnyxTransport.send_pcm(websocket, out_frame.data)
+        await asyncio.gather(receive_loop(), send_loop())
     finally:
         await pipeline.stop()
+        end_time = datetime.now(UTC)
+        duration = (end_time - start_time).total_seconds()
+
+        # Update call run
+        async with AsyncSessionLocal() as db_session:
+            res = await db_session.execute(select(CallRun).where(CallRun.id == run_id))
+            r = res.scalar_one_or_none()
+            if r:
+                r.status = "completed"
+                r.ended_at = end_time
+                r.duration_seconds = duration
+                
+                # Upload transcript to MinIO/local fallback
+                transcript_text = "\n".join(transcript_segments)
+                if transcript_text:
+                    try:
+                        filename = f"transcripts/{run_id}.txt"
+                        from app.tasks.worker import upload_file_to_minio
+                        from app.core.config import MINIO_BUCKET
+                        path = upload_file_to_minio(MINIO_BUCKET, filename, transcript_text.encode("utf-8"), "text/plain")
+                        r.transcript_path = path
+                    except Exception as e:
+                        logger.error(f"Failed to upload transcript to MinIO: {e}")
+                
+                await db_session.commit()
+
+        # Enqueue background tasks on ARQ worker
+        try:
+            from arq import create_pool
+            from arq.connections import RedisSettings
+            from app.core.config import REDIS_URL
+            redis_settings = RedisSettings.from_dsn(REDIS_URL)
+            async def trigger_tasks():
+                arq_pool = await create_pool(redis_settings)
+                await arq_pool.enqueue_job("process_call_completion", run_id)
+                await arq_pool.enqueue_job("update_customer_profile", run_id)
+                await arq_pool.close()
+            
+            asyncio.create_task(trigger_tasks())
+        except Exception as e:
+            logger.error(f"Failed to enqueue ARQ background tasks: {e}")
 
 
 @router.post("/telephony/inbound/telnyx")
@@ -49,8 +156,14 @@ async def inbound_telnyx(
     call_control_id: str = Query(...),
     org_id: int = Query(...),
     agent_id: int = Query(...),
+    from_number: str | None = Query(None, alias="from"),
+    to_number: str | None = Query(None, alias="to"),
 ):
     ws_url = f"wss://api.example.com/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}&org_id={org_id}&agent_id={agent_id}"
+    if from_number:
+        ws_url += f"&from={from_number}"
+    if to_number:
+        ws_url += f"&to={to_number}"
     return {
         "texml": f"<Response><Connect><WebSocket url='{ws_url}'/></Connect></Response>"
     }

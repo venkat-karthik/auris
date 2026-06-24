@@ -5,6 +5,7 @@ from app.models.billing import CreditTransaction
 from app.models.call_run import CallRun
 from app.models.organization import OrgMember, Organization
 from app.models.user import User
+from app.models.customer_profile import CustomerProfile
 
 __all__ = [
     "User",
@@ -14,4 +15,5 @@ __all__ = [
     "Agent",
     "CallRun",
     "CreditTransaction",
+    "CustomerProfile",
 ]

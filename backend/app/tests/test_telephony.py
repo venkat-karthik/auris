@@ -76,7 +76,8 @@ async def test_telephony_ws_flow(db_session: AsyncSession, test_org, test_user):
         ) as ws:
             # The websocket connection will accept, query DB, start pipeline,
             # process the mocked generator yields, send PCM, and gracefully stop.
-            pass
+            import time
+            time.sleep(0.5)
 
     # Verify send_pcm was called with output data
     assert mock_send_pcm.call_count > 0

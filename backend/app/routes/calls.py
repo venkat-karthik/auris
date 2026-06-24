@@ -92,6 +92,8 @@ async def websocket_call(
     websocket: WebSocket,
     agent_id: int,
     token: str,  # JWT passed as query param: /ws/123?token=xxx
+    caller_number: str | None = None,
+    called_number: str | None = None,
 ):
     """
     WebSocket endpoint for browser voice calls.
@@ -131,6 +133,10 @@ async def websocket_call(
             await websocket.close()
             return
 
+        # Look up repeat caller info for prompt injection
+        from app.services.customer_memory import lookup_customer
+        customer_context = await lookup_customer(db, agent.org_id, caller_number)
+
         # Create call run record
         run = CallRun(
             org_id=agent.org_id,
@@ -138,6 +144,8 @@ async def websocket_call(
             transport="webrtc",
             call_type="inbound",
             status="running",
+            caller_number=caller_number,
+            called_number=called_number,
             started_at=datetime.now(UTC),
         )
         db.add(run)
@@ -150,6 +158,8 @@ async def websocket_call(
     # Build the pipeline
     # Extract system prompt from agent graph (first node or top-level prompt)
     system_prompt = _extract_system_prompt(agent.graph)
+    if customer_context:
+        system_prompt += customer_context
     language = agent.model_config.get("language", "en")
 
     pipeline = build_pipeline(
@@ -158,10 +168,29 @@ async def websocket_call(
         language=language,
     )
 
+    from app.services.pipeline.frame import FrameType
+    transcript_segments = []
+
+    async def collecting_wrapper():
+        frame = await pipeline.collect()
+        if frame:
+            if frame.type == FrameType.STT_TRANSCRIPT:
+                data = frame.data or {}
+                if data.get("is_final"):
+                    text = data.get("text", "").strip()
+                    if text:
+                        transcript_segments.append(f"User: {text}")
+            elif frame.type == FrameType.LLM_TEXT_COMPLETE:
+                data = frame.data or {}
+                text = data.get("text", "").strip()
+                if text:
+                    transcript_segments.append(f"Agent: {text}")
+        return frame
+
     transport = WebRTCTransport(
         ws=websocket,
         pipeline_push=pipeline.push,
-        pipeline_collect=pipeline.collect,
+        pipeline_collect=collecting_wrapper,
     )
 
     start_time = datetime.now(UTC)
@@ -186,7 +215,36 @@ async def websocket_call(
                 run.status = "completed"
                 run.ended_at = end_time
                 run.duration_seconds = duration
+                
+                # Upload transcript to MinIO/local fallback
+                transcript_text = "\n".join(transcript_segments)
+                if transcript_text:
+                    try:
+                        filename = f"transcripts/{run_id}.txt"
+                        from app.tasks.worker import upload_file_to_minio
+                        from app.core.config import MINIO_BUCKET
+                        path = upload_file_to_minio(MINIO_BUCKET, filename, transcript_text.encode("utf-8"), "text/plain")
+                        run.transcript_path = path
+                    except Exception as e:
+                        logger.error(f"Failed to upload transcript to MinIO: {e}")
+                
                 await db.commit()
+
+        # Enqueue background tasks on ARQ worker
+        try:
+            from arq import create_pool
+            from arq.connections import RedisSettings
+            from app.core.config import REDIS_URL
+            redis_settings = RedisSettings.from_dsn(REDIS_URL)
+            async def trigger_tasks():
+                arq_pool = await create_pool(redis_settings)
+                await arq_pool.enqueue_job("process_call_completion", run_id)
+                await arq_pool.enqueue_job("update_customer_profile", run_id)
+                await arq_pool.close()
+            
+            asyncio.create_task(trigger_tasks())
+        except Exception as e:
+            logger.error(f"Failed to enqueue ARQ background tasks: {e}")
 
         logger.info(f"Call run {run_id} completed: {duration:.1f}s")
 
