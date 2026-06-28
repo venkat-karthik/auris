@@ -30,6 +30,7 @@ interface CallRun {
   duration_seconds: number | null;
   disposition: string | null;
   created_at: string;
+  voicemail?: boolean;
 }
 
 export default function CallLogsPage() {
