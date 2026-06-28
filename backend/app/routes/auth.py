@@ -42,22 +42,42 @@ class MeResponse(BaseModel):
     selected_org_id: int | None
 
 
-@router.post("/signup", response_model=TokenResponse, status_code=201)
+class SignupResponse(BaseModel):
+    user_id: int
+    email: str
+    is_verified: bool
+    message: str
+
+
+class VerifyRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
+@router.post("/signup", response_model=SignupResponse, status_code=201)
 async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     # Check email not taken
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    import random
+    import string
+    from datetime import timedelta
+    from loguru import logger
+
+    code = "".join(random.choices(string.digits, k=6))
+
     user = User(
         email=body.email.lower(),
         password_hash=hash_password(body.password),
         full_name=body.full_name,
+        is_verified=False,
+        verification_code=code,
+        verification_expires_at=datetime.now(UTC) + timedelta(minutes=15)
     )
     db.add(user)
     await db.flush()  # Get user.id without commit
-
-    org_id: int | None = None
 
     # Auto-create org on signup
     org_name = body.org_name or f"{body.full_name or body.email.split('@')[0]}'s Team"
@@ -81,12 +101,43 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     db.add(member)
 
     user.selected_org_id = org.id
-    org_id = org.id
-
     await db.commit()
 
-    token = create_access_token(user_id=user.id, org_id=org_id)
-    return TokenResponse(access_token=token, user_id=user.id, org_id=org_id)
+    # Log to console so developer can verify locally
+    logger.info(f"✉️ [VERIFICATION EMAIL] Code for {user.email}: {code}")
+
+    return SignupResponse(
+        user_id=user.id,
+        email=user.email,
+        is_verified=False,
+        message="Verification email sent."
+    )
+
+
+@router.post("/verify", response_model=TokenResponse)
+async def verify_code(body: VerifyRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == body.email.lower()))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_verified:
+        token = create_access_token(user_id=user.id, org_id=user.selected_org_id)
+        return TokenResponse(access_token=token, user_id=user.id, org_id=user.selected_org_id)
+
+    if not user.verification_code or user.verification_code != body.code:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+
+    if user.verification_expires_at and user.verification_expires_at < datetime.now(UTC):
+        raise HTTPException(status_code=400, detail="Verification code has expired")
+
+    user.is_verified = True
+    user.verification_code = None
+    user.verification_expires_at = None
+    await db.commit()
+
+    token = create_access_token(user_id=user.id, org_id=user.selected_org_id)
+    return TokenResponse(access_token=token, user_id=user.id, org_id=user.selected_org_id)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -102,6 +153,12 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before logging in."
+        )
 
     token = create_access_token(user_id=user.id, org_id=user.selected_org_id)
     return TokenResponse(access_token=token, user_id=user.id, org_id=user.selected_org_id)

@@ -97,3 +97,60 @@ async def test_settings_org_and_keys_endpoints(client: AsyncClient, db_session: 
         # Verify key list is now empty (archived keys filtered out)
         list_resp2 = await client.get("/api/v1/api-keys")
         assert len(list_resp2.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_email_verification_flow(client: AsyncClient, db_session: AsyncSession):
+    # 1. Sign up user
+    signup_payload = {
+        "email": "test-verify@domain.com",
+        "password": "securepassword123",
+        "full_name": "Verify Tester",
+        "org_name": "Verification Corp"
+    }
+    response = await client.post("/api/v1/auth/signup", json=signup_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["email"] == "test-verify@domain.com"
+    assert data["is_verified"] is False
+
+    # Get user code directly from database
+    from app.models.user import User
+    from sqlalchemy import select
+    res = await db_session.execute(select(User).where(User.email == "test-verify@domain.com"))
+    user = res.scalar_one_or_none()
+    assert user is not None
+    assert user.verification_code is not None
+
+    # 2. Try logging in before verifying (should fail with 403)
+    login_payload = {
+        "email": "test-verify@domain.com",
+        "password": "securepassword123"
+    }
+    login_resp = await client.post("/api/v1/auth/login", json=login_payload)
+    assert login_resp.status_code == 403
+    assert "verify" in login_resp.json()["detail"].lower()
+
+    # 3. Call verify with wrong code (should fail)
+    verify_payload_wrong = {
+        "email": "test-verify@domain.com",
+        "code": "000000"
+    }
+    verify_resp_wrong = await client.post("/api/v1/auth/verify", json=verify_payload_wrong)
+    assert verify_resp_wrong.status_code == 400
+
+    # 4. Verify with correct code (should succeed and return token)
+    verify_payload_correct = {
+        "email": "test-verify@domain.com",
+        "code": user.verification_code
+    }
+    verify_resp_correct = await client.post("/api/v1/auth/verify", json=verify_payload_correct)
+    assert verify_resp_correct.status_code == 200
+    token_data = verify_resp_correct.json()
+    assert "access_token" in token_data
+    assert token_data["user_id"] == user.id
+
+    # 5. Log in after verifying (should succeed)
+    login_resp2 = await client.post("/api/v1/auth/login", json=login_payload)
+    assert login_resp2.status_code == 200
+    assert "access_token" in login_resp2.json()
