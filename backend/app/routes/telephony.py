@@ -230,6 +230,13 @@ async def telnyx_ws(
 
     start_time = datetime.now(UTC)
 
+    # Start credit monitor loop in background
+    cost_tier = agent.model_config.get("cost_tier", "standard")
+    from app.routes.calls import credit_monitor_loop
+    monitor_task = asyncio.create_task(
+        credit_monitor_loop(run_id, org_id, cost_tier, pipeline, websocket)
+    )
+
     voicemail_audio_accumulator = []
     voicemail_detection_done = False
 
@@ -264,13 +271,14 @@ async def telnyx_ws(
             logger.info(f"Telnyx receive loop ended/disconnected: {e}")
 
     async def send_loop():
+        state = None
         try:
             while True:
                 out_frame = await collecting_wrapper()
                 if out_frame is None:
                     break
                 if out_frame.type == FrameType.AUDIO_OUT:
-                    await TelnyxTransport.send_pcm(websocket, out_frame.data)
+                    _, state = await TelnyxTransport.send_pcm(websocket, out_frame.data, state)
                 elif out_frame.type == FrameType.CALL_END:
                     break
         except Exception as e:
@@ -280,6 +288,7 @@ async def telnyx_ws(
     try:
         await asyncio.gather(receive_loop(), send_loop())
     finally:
+        monitor_task.cancel()
         await pipeline.stop()
         from app.services.monitor_tracker import MonitorTracker
         MonitorTracker.end_call(run_id)

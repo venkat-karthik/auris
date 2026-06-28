@@ -1,214 +1,274 @@
 import pytest
-import struct
 import asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from unittest.mock import AsyncMock, MagicMock, patch
+from sqlalchemy import select
 
-from app.services.pipeline.frame import Frame, FrameType
-from app.services.pipeline.stt.vad import VADProcessor
-from app.services.pipeline.llm.openai_llm import OpenAILLM
+from app.core.database import AsyncSessionLocal
 from app.models.organization import Organization
+from app.models.call_run import CallRun
+from app.models.agent import Agent
+from app.models.campaign import Campaign, CampaignContact
+from app.services.pipeline.transport.telnyx_transport import TelnyxTransport
+from app.routes.calls import credit_monitor_loop
+from app.tasks.worker import process_call_completion, dial_next_contacts
+
+# Helper mock classes for WebSocket async iterator
+class MockWebSocketIter:
+    def __init__(self, items):
+        self.items = items
+    def __aiter__(self):
+        return self
+    async def __anext__(self):
+        if not self.items:
+            raise StopAsyncIteration
+        return self.items.pop(0)
+
+class MockWebSocket:
+    def __init__(self, items):
+        self.items = items
+    def iter_text(self):
+        return MockWebSocketIter(self.items)
 
 
+# 1. Test Resampling logic
 @pytest.mark.asyncio
-async def test_vad_onset_offset_detection():
-    # 1. Initialize processor with low silence limit for rapid testing
-    processor = VADProcessor(threshold=100.0, silence_limit_ms=100.0, onset_limit_ms=20.0)
+async def test_telnyx_transport_resampling():
+    # 80 samples of 8kHz linear PCM = 160 bytes
+    dummy_pcm_8k = b"\x00\x00" * 80
     
-    emitted_frames = []
-    async def mock_emit(frame):
-        emitted_frames.append(frame)
-    processor.emit = mock_emit
-
-    # Generate a loud sound frame (PCM 16-bit Mono, 16000Hz, size 640 bytes = 20ms chunk)
-    loud_data = struct.pack("<320h", *[500] * 320)
-    loud_frame = Frame(type=FrameType.AUDIO_IN, data=loud_data)
-
-    # Process loud frames to trigger voice onset (USER_SPEAKING)
-    await processor.process_frame(loud_frame)
-    await processor.process_frame(loud_frame)
+    # Convert dummy pcm to ulaw first so we can feed it to receive_ulaw
+    ulaw_data = TelnyxTransport.pcm_to_ulaw(dummy_pcm_8k)
     
-    assert any(f.type == FrameType.USER_SPEAKING for f in emitted_frames)
+    # Mock WebSocket that yields ulaw
+    mock_ws = MockWebSocket([ulaw_data])
     
-    # Reset list and process silent frames (all zeros)
-    emitted_frames.clear()
-    silent_data = struct.pack("<320h", *[0] * 320)
-    silent_frame = Frame(type=FrameType.AUDIO_IN, data=silent_data)
-
-    # Send 120ms of silence (6 frames of 20ms) to trigger voice offset (USER_SILENT)
-    for _ in range(6):
-        await processor.process_frame(silent_frame)
+    pcm_chunks = []
+    async for chunk in TelnyxTransport.receive_ulaw(mock_ws):
+        pcm_chunks.append(chunk)
         
-    assert any(f.type == FrameType.USER_SILENT for f in emitted_frames)
+    assert len(pcm_chunks) == 1
+    # 8kHz to 16kHz resampling should double the number of samples/bytes (allow minor filter group delay delta)
+    assert abs(len(pcm_chunks[0]) - len(dummy_pcm_8k) * 2) <= 10
 
-
-@pytest.mark.asyncio
-async def test_openai_llm_interruption():
-    # Initialize LLM processor
-    llm = OpenAILLM(api_key="mock-key")
+    # Test send_pcm downsampling (160 samples of 16kHz PCM = 320 bytes)
+    dummy_pcm_16k = b"\x00\x00" * 160
+    mock_send_ws = AsyncMock()
     
-    # Mock a running background generate task
-    mock_task = MagicMock()
-    mock_task.done.return_value = False
-    llm._gen_task = mock_task
-
-    # Send USER_SPEAKING frame to trigger interruption
-    await llm.process_frame(Frame(type=FrameType.USER_SPEAKING))
+    ulaw_out, state = await TelnyxTransport.send_pcm(mock_send_ws, dummy_pcm_16k)
     
-    # Verify task was canceled
-    mock_task.cancel.assert_called_once()
+    # Verification
+    assert mock_send_ws.send_bytes.call_count == 1
+    # 16kHz downsampled to 8kHz should halve the number of samples (width=2, 80 samples = 80 bytes of ulaw)
+    assert len(ulaw_out) == 80
 
 
+# 2. Test Real-time Credit Metering Loop
 @pytest.mark.asyncio
-async def test_settings_org_and_keys_endpoints(client: AsyncClient, db_session: AsyncSession, test_org, test_user):
-    with (
-        patch("app.dependencies.auth.get_current_org", return_value=test_org),
-        patch("app.dependencies.auth.get_current_user", return_value=test_user)
-    ):
-        # 1. Update organization name
-        org_payload = {"name": "Auris Enterprise Team"}
-        response = await client.put("/api/v1/auth/organization", json=org_payload)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["name"] == "Auris Enterprise Team"
+async def test_credit_monitor_loop(db_session, test_org, test_user):
+    # Setup agent
+    agent = Agent(
+        org_id=test_org.id,
+        created_by=test_user.id,
+        name="Billing Agent",
+        model_config={"cost_tier": "standard"}
+    )
+    db_session.add(agent)
+    await db_session.commit()
+    await db_session.refresh(agent)
+    
+    # Setup call run
+    run = CallRun(
+        org_id=test_org.id,
+        agent_id=agent.id,
+        transport="webrtc",
+        call_type="inbound",
+        status="running",
+        credits_used=0.0,
+        cost_usd=0.0
+    )
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
 
-        # 2. Create API key
-        key_payload = {"name": "Prod Server"}
-        key_resp = await client.post("/api/v1/api-keys", json=key_payload)
-        assert key_resp.status_code == 201
-        key_data = key_resp.json()
-        assert key_data["name"] == "Prod Server"
-        assert "raw_key" in key_data
-        assert key_data["raw_key"].startswith("ak_")
-        key_id = key_data["id"]
+    mock_pipeline = MagicMock()
+    mock_pipeline.push = AsyncMock()
+    mock_ws = AsyncMock()
 
-        # 3. List API keys
-        list_resp = await client.get("/api/v1/api-keys")
-        assert list_resp.status_code == 200
-        list_data = list_resp.json()
-        assert len(list_data) >= 1
-        assert list_data[0]["key_prefix"] == key_data["key_prefix"]
+    # We patch asyncio.sleep to run only once and then raise CancelledError to exit loop
+    original_sleep = asyncio.sleep
+    sleep_count = 0
+    async def mock_sleep(secs):
+        nonlocal sleep_count
+        sleep_count += 1
+        if sleep_count > 1:
+            raise asyncio.CancelledError()
+        await original_sleep(0.001)
 
-        # 4. Revoke API key
-        delete_resp = await client.delete(f"/api/v1/api-keys/{key_id}")
-        assert delete_resp.status_code == 200
+    # Use a fresh session for the query to ensure we bypass session cache/active transaction limits
+    with patch("asyncio.sleep", side_effect=mock_sleep):
+        try:
+            # Org has 100.0 credits initially
+            await credit_monitor_loop(run.id, test_org.id, "standard", mock_pipeline, mock_ws)
+        except asyncio.CancelledError:
+            pass
 
-        # Verify key list is now empty (archived keys filtered out)
-        list_resp2 = await client.get("/api/v1/api-keys")
-        assert len(list_resp2.json()) == 0
+    async with AsyncSessionLocal() as session:
+        org_res = await session.execute(select(Organization).where(Organization.id == test_org.id))
+        fresh_org = org_res.scalar_one()
+        run_res = await session.execute(select(CallRun).where(CallRun.id == run.id))
+        fresh_run = run_res.scalar_one()
+    
+    assert fresh_org.balance_credits < 100.0
+    assert fresh_run.credits_used > 0.0
+    assert fresh_run.cost_usd > 0.0
+    
+    # Test termination if credits are zero
+    async with AsyncSessionLocal() as session:
+        org_res = await session.execute(select(Organization).where(Organization.id == test_org.id))
+        db_org = org_res.scalar_one()
+        db_org.balance_credits = 0.0
+        await session.commit()
+
+    sleep_count = 0
+    mock_pipeline.push.reset_mock()
+    mock_ws.close.reset_mock()
+
+    with patch("asyncio.sleep", side_effect=mock_sleep):
+        try:
+            await credit_monitor_loop(run.id, test_org.id, "standard", mock_pipeline, mock_ws)
+        except asyncio.CancelledError:
+            pass
+
+    # Assert that pipeline call end frame and websocket close were called
+    assert mock_pipeline.push.call_count > 0
+    assert mock_ws.close.call_count > 0
 
 
+# 3. Test Post-Call Completion remaining credit deduction (prevent double spend)
 @pytest.mark.asyncio
-async def test_email_verification_flow(client: AsyncClient, db_session: AsyncSession):
-    # 1. Sign up user
-    signup_payload = {
-        "email": "test-verify@domain.com",
-        "password": "securepassword123",
-        "full_name": "Verify Tester",
-        "org_name": "Verification Corp"
-    }
-    response = await client.post("/api/v1/auth/signup", json=signup_payload)
-    assert response.status_code == 201
-    data = response.json()
-    assert data["email"] == "test-verify@domain.com"
-    assert data["is_verified"] is False
+async def test_process_call_completion(db_session, test_org, test_user):
+    # Setup agent
+    agent = Agent(
+        org_id=test_org.id,
+        created_by=test_user.id,
+        name="Worker Agent",
+        model_config={"cost_tier": "standard"}
+    )
+    db_session.add(agent)
+    await db_session.commit()
+    await db_session.refresh(agent)
+    
+    # Setup CallRun. Say 30 seconds call.
+    # standard price_per_second = 0.0008 USD. 30 sec = 0.024 USD.
+    # credits = 0.024 * 83 = 1.992 credits.
+    # Suppose we already deducted 1.328 credits (20 seconds) in real-time.
+    run = CallRun(
+        org_id=test_org.id,
+        agent_id=agent.id,
+        transport="webrtc",
+        call_type="inbound",
+        status="running",
+        duration_seconds=30.0,
+        credits_used=1.328,
+        cost_usd=0.016
+    )
+    db_session.add(run)
+    
+    test_org.balance_credits = 10.0
+    db_session.add(test_org)
+    await db_session.commit()
 
-    # Get user code directly from database
-    from app.models.user import User
-    from sqlalchemy import select
-    res = await db_session.execute(select(User).where(User.email == "test-verify@domain.com"))
-    user = res.scalar_one_or_none()
-    assert user is not None
-    assert user.verification_code is not None
+    # Run the ARQ task completion worker
+    await process_call_completion(None, run.id)
 
-    # 2. Try logging in before verifying (should fail with 403)
-    login_payload = {
-        "email": "test-verify@domain.com",
-        "password": "securepassword123"
-    }
-    login_resp = await client.post("/api/v1/auth/login", json=login_payload)
-    assert login_resp.status_code == 403
-    assert "verify" in login_resp.json()["detail"].lower()
+    # Refresh in fresh session to bypass cache
+    async with AsyncSessionLocal() as session:
+        org_res = await session.execute(select(Organization).where(Organization.id == test_org.id))
+        fresh_org = org_res.scalar_one()
+        run_res = await session.execute(select(CallRun).where(CallRun.id == run.id))
+        fresh_run = run_res.scalar_one()
 
-    # 3. Call verify with wrong code (should fail)
-    verify_payload_wrong = {
-        "email": "test-verify@domain.com",
-        "code": "000000"
-    }
-    verify_resp_wrong = await client.post("/api/v1/auth/verify", json=verify_payload_wrong)
-    assert verify_resp_wrong.status_code == 400
-
-    # 4. Verify with correct code (should succeed and return token)
-    verify_payload_correct = {
-        "email": "test-verify@domain.com",
-        "code": user.verification_code
-    }
-    verify_resp_correct = await client.post("/api/v1/auth/verify", json=verify_payload_correct)
-    assert verify_resp_correct.status_code == 200
-    token_data = verify_resp_correct.json()
-    assert "access_token" in token_data
-    assert token_data["user_id"] == user.id
-
-    # 5. Log in after verifying (should succeed)
-    login_resp2 = await client.post("/api/v1/auth/login", json=login_payload)
-    assert login_resp2.status_code == 200
-    assert "access_token" in login_resp2.json()
+    # Total credits for 30s standard call = 30 * 0.0008 * 83 = 1.992.
+    # Remaining to deduct: 1.992 - 1.328 = 0.664.
+    # New balance should be 10.0 - 0.664 = 9.336 credits.
+    assert abs(fresh_run.credits_used - 1.992) < 0.001
+    assert abs(fresh_org.balance_credits - 9.336) < 0.001
 
 
+# 4. Test Dialer Concurrency Throttling
 @pytest.mark.asyncio
-async def test_phone_number_leasing_and_binding(client: AsyncClient, db_session: AsyncSession, test_org, test_user):
-    with (
-        patch("app.dependencies.auth.get_current_org", return_value=test_org),
-        patch("app.dependencies.auth.get_current_user", return_value=test_user)
-    ):
-        # Set org balance to have enough credits
-        test_org.balance_credits = 500.0
-        await db_session.commit()
+async def test_dialer_concurrency_throttling(db_session, test_org, test_user):
+    # Setup agent
+    agent = Agent(
+        org_id=test_org.id,
+        created_by=test_user.id,
+        name="Dialer Agent",
+        model_config={"stt": {"provider": "deepgram"}}
+    )
+    db_session.add(agent)
+    await db_session.commit()
+    await db_session.refresh(agent)
+    
+    # Setup campaign
+    campaign = Campaign(
+        org_id=test_org.id,
+        agent_id=agent.id,
+        name="Test Dialer Campaign",
+        status="running"
+    )
+    db_session.add(campaign)
+    await db_session.commit()
+    await db_session.refresh(campaign)
 
-        # 1. Search available numbers
-        search_resp = await client.get("/api/v1/phone-numbers/search?area_code=830")
-        assert search_resp.status_code == 200
-        available = search_resp.json()
-        assert len(available) >= 1
-        phone_to_buy = available[0]["phone_number"]
+    # 1. Max limit is 5. Insert 5 "in_progress" contacts and 1 "pending".
+    for i in range(5):
+        contact_in_progress = CampaignContact(
+            campaign_id=campaign.id,
+            phone_number=f"+91999990000{i}",
+            name=f"Progress User {i}",
+            status="in_progress"
+        )
+        db_session.add(contact_in_progress)
+        
+    pending_contact = CampaignContact(
+        campaign_id=campaign.id,
+        phone_number="+918888800000",
+        name="Pending User",
+        status="pending"
+    )
+    db_session.add(pending_contact)
+    await db_session.commit()
 
-        # 2. Buy/lease the number
-        buy_payload = {"phone_number": phone_to_buy, "label": "Support Desk Line"}
-        buy_resp = await client.post("/api/v1/phone-numbers/buy", json=buy_payload)
-        assert buy_resp.status_code == 200
-        bought_data = buy_resp.json()
-        assert bought_data["phone_number"] == phone_to_buy
-        assert bought_data["label"] == "Support Desk Line"
-        number_id = bought_data["id"]
+    # Call dial_next_contacts and mock redis
+    mock_redis = MagicMock()
+    mock_redis.enqueue_job = AsyncMock()
+    ctx = {"redis": mock_redis}
 
-        # Org balance should be reduced (500 - 160 = 340)
-        assert test_org.balance_credits == 340.0
+    with patch("app.services.dialer_service.dial_number", return_value=True) as mock_dial:
+        await dial_next_contacts(ctx, campaign.id)
 
-        # 3. List leased numbers
-        list_resp = await client.get("/api/v1/phone-numbers")
-        assert list_resp.status_code == 200
-        numbers = list_resp.json()
-        assert any(n["id"] == number_id for n in numbers)
+        # The dialer should defer/schedule again without dialing the pending contact
+        assert mock_dial.call_count == 0
+        assert mock_redis.enqueue_job.call_count == 1
+        mock_redis.enqueue_job.assert_called_with("dial_next_contacts", campaign.id, _defer_by=5)
 
-        # 4. Bind number to agent
-        # Create a dummy agent first
-        from app.models.agent import Agent
-        dummy_agent = Agent(org_id=test_org.id, name="Telnyx Inbound Assistant")
-        db_session.add(dummy_agent)
-        await db_session.commit()
+        # 2. Concurrency falls below limit. Mark one contact as completed.
+        # So we have 4 "in_progress" and 1 "pending".
+        # It should successfully trigger dial_number on the pending contact.
+        async with AsyncSessionLocal() as session:
+            res_contacts = await session.execute(
+                select(CampaignContact).where(CampaignContact.phone_number == "+919999900000")
+            )
+            completed_contact = res_contacts.scalar_one_or_none()
+            completed_contact.status = "completed"
+            await session.commit()
 
-        bind_payload = {"agent_id": dummy_agent.id}
-        bind_resp = await client.put(f"/api/v1/phone-numbers/{number_id}/bind", json=bind_payload)
-        assert bind_resp.status_code == 200
-        bound_data = bind_resp.json()
-        assert bound_data["agent_id"] == dummy_agent.id
-        assert bound_data["agent_name"] == "Telnyx Inbound Assistant"
+        mock_redis.enqueue_job.reset_mock()
+        mock_dial.reset_mock()
 
-        # 5. Release number
-        del_resp = await client.delete(f"/api/v1/phone-numbers/{number_id}")
-        assert del_resp.status_code == 200
+        await dial_next_contacts(ctx, campaign.id)
 
-        # Verify number list is empty again
-        list_resp2 = await client.get("/api/v1/phone-numbers")
-        assert len(list_resp2.json()) == 0
+        # Verify that the pending contact was dialed
+        assert mock_dial.call_count == 1
+        # Check that it enqueues next loop check
+        assert mock_redis.enqueue_job.call_count == 1

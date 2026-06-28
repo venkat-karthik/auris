@@ -28,6 +28,7 @@ class Organization(Base):
     api_keys = relationship("ApiKey", back_populates="org")
     call_runs = relationship("CallRun", back_populates="org")
     credit_transactions = relationship("CreditTransaction", back_populates="org")
+    phone_numbers = relationship("PhoneNumber", back_populates="org", cascade="all, delete-orphan")
 
 
 class OrgMember(Base):

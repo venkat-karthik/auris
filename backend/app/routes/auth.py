@@ -1,6 +1,8 @@
 """
 Auris - Auth routes: signup, login, me
 """
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -63,7 +65,6 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
 
     import random
     import string
-    from datetime import timedelta
     from loguru import logger
 
     code = "".join(random.choices(string.digits, k=6))

@@ -1,60 +1,143 @@
-import audioop
-from typing import AsyncGenerator
+"""
+Auris - Telnyx Transport
+Converts μ-law 8 kHz ↔ PCM 16 kHz for Telnyx WebSocket calls.
+
+Python 3.13 removed `audioop` from the stdlib.  We try to import
+`audioop-lts` (the drop-in back-port) first, then the built-in.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+from typing import AsyncGenerator, Optional
+
+from loguru import logger
+
+# Prefer the back-port on Python 3.13+; fall back to stdlib on older versions.
+try:
+    import audioop_lts as audioop  # type: ignore[import]
+except ImportError:
+    try:
+        import audioop  # type: ignore[import]
+    except ImportError:
+        audioop = None  # type: ignore[assignment]
+
 
 class TelnyxTransport:
     """Transport for Telnyx inbound call audio.
 
-    Telnyx sends μ‑law 8kHz audio frames over a WebSocket. This class converts
-    the incoming μ‑law bytes to 16kHz PCM (the format expected by the pipeline)
-    and provides a simple async generator that yields PCM chunks. The reverse
-    conversion is also provided for sending audio back to Telnyx.
+    Telnyx streams audio over a WebSocket in one of two formats:
+
+    1. **JSON envelope** (media streaming):
+       ``{"event": "media", "media": {"payload": "<base64-mulaw>"}}``
+    2. **Raw binary** (legacy / direct): raw μ-law bytes.
+
+    This class handles both.  Incoming μ-law 8 kHz is converted to
+    16 kHz PCM 16-bit mono for the pipeline; the reverse path converts
+    pipeline output back to μ-law 8 kHz before sending to Telnyx.
     """
 
-    INPUT_RATE = 8000
-    OUTPUT_RATE = 16000
-    SAMPLE_WIDTH = 2  # 16‑bit PCM
+    INPUT_RATE = 8_000
+    OUTPUT_RATE = 16_000
+    SAMPLE_WIDTH = 2  # bytes — 16-bit PCM
 
-    @staticmethod
-    def ulaw_to_pcm(data: bytes) -> bytes:
-        """Convert μ‑law bytes to 16‑bit PCM.
-        """
-        return audioop.ulaw2lin(data, TelnyxTransport.SAMPLE_WIDTH)
+    # ------------------------------------------------------------------
+    # Low-level codec helpers
+    # ------------------------------------------------------------------
 
-    @staticmethod
-    def pcm_to_ulaw(data: bytes) -> bytes:
-        """Convert 16‑bit PCM to μ‑law.
-        """
-        return audioop.lin2ulaw(data, TelnyxTransport.SAMPLE_WIDTH)
+    @classmethod
+    def ulaw_to_pcm(cls, data: bytes) -> bytes:
+        """Convert μ-law bytes → 16-bit PCM."""
+        if audioop is None:
+            raise RuntimeError(
+                "audioop is not available.  Install 'audioop-lts' for Python 3.13+: "
+                "pip install audioop-lts"
+            )
+        return audioop.ulaw2lin(data, cls.SAMPLE_WIDTH)
 
-    @staticmethod
-    def resample_pcm(data: bytes) -> bytes:
-        """Resample 8kHz PCM to 16kHz using simple duplication.
-        For a production system you would use a proper resampler; here we
-        duplicate each sample to double the sample rate.
+    @classmethod
+    def pcm_to_ulaw(cls, data: bytes) -> bytes:
+        """Convert 16-bit PCM → μ-law bytes."""
+        if audioop is None:
+            raise RuntimeError(
+                "audioop is not available.  Install 'audioop-lts' for Python 3.13+: "
+                "pip install audioop-lts"
+            )
+        return audioop.lin2ulaw(data, cls.SAMPLE_WIDTH)
+
+    @classmethod
+    def resample(cls, data: bytes, from_rate: int, to_rate: int, state=None):
+        """Resample PCM data between two rates using audioop.ratecv.
+
+        Returns ``(resampled_bytes, new_state)``.
         """
-        # Convert to 8kHz linear PCM first (already 16‑bit after ulaw conversion)
-        # Duplicate each 2‑byte sample
-        doubled = b"".join([data[i:i+2] * 2 for i in range(0, len(data), 2)])
-        return doubled
+        if audioop is None:
+            raise RuntimeError("audioop is not available.  Install 'audioop-lts'.")
+        return audioop.ratecv(data, cls.SAMPLE_WIDTH, 1, from_rate, to_rate, state)
+
+    # ------------------------------------------------------------------
+    # Async stream helpers
+    # ------------------------------------------------------------------
 
     @classmethod
     async def receive_ulaw(cls, websocket) -> AsyncGenerator[bytes, None]:
-        """Yield PCM data received from the Telnyx WebSocket.
-        The caller iterates over the generator to feed audio into the pipeline.
+        """Yield 16 kHz PCM chunks received from the Telnyx WebSocket.
+
+        Handles both JSON-envelope (media streaming) and raw-binary frames.
         """
+        state = None
         async for message in websocket.iter_text():
-            # Telnyx sends raw binary in text base64? For simplicity assume binary.
-            raw_ulaw = message.encode() if isinstance(message, str) else message
-            pcm = cls.ulaw_to_pcm(raw_ulaw)
-            # Resample to 16kHz
-            pcm_16k = cls.resample_pcm(pcm)
-            yield pcm_16k
+            raw_ulaw: Optional[bytes] = None
+
+            # Try JSON envelope first (Telnyx media streaming format)
+            if isinstance(message, str):
+                try:
+                    envelope = json.loads(message)
+                    event = envelope.get("event", "")
+                    if event == "media":
+                        payload_b64 = envelope.get("media", {}).get("payload", "")
+                        if payload_b64:
+                            raw_ulaw = base64.b64decode(payload_b64)
+                    elif event in ("connected", "start", "stop", "mark"):
+                        # Control frames — ignore silently
+                        continue
+                    else:
+                        # Unknown JSON frame — skip
+                        logger.debug(f"TelnyxTransport: unknown event '{event}', skipping")
+                        continue
+                except (json.JSONDecodeError, Exception):
+                    # Not JSON — treat as raw bytes encoded as a string
+                    raw_ulaw = message.encode("latin-1")
+            else:
+                raw_ulaw = message  # binary frame
+
+            if not raw_ulaw:
+                continue
+
+            try:
+                pcm_8k = cls.ulaw_to_pcm(raw_ulaw)
+                pcm_16k, state = cls.resample(pcm_8k, cls.INPUT_RATE, cls.OUTPUT_RATE, state)
+                yield pcm_16k
+            except Exception as e:
+                logger.error(f"TelnyxTransport.receive_ulaw codec error: {e}")
 
     @classmethod
-    async def send_pcm(cls, websocket, pcm_data: bytes) -> None:
-        """Send PCM data back to Telnyx as μ‑law.
+    async def send_pcm(
+        cls,
+        websocket,
+        pcm_data: bytes,
+        state=None,
+    ) -> tuple[bytes, object]:
+        """Convert 16 kHz PCM → μ-law 8 kHz and send to Telnyx.
+
+        Returns ``(ulaw_bytes, new_state)`` so callers can chain resampling state.
         """
-        # Down‑sample from 16kHz to 8kHz by halving sample pairs
-        pcm_8k = b"".join([pcm_data[i:i+2] for i in range(0, len(pcm_data), 4)])
-        ulaw = cls.pcm_to_ulaw(pcm_8k)
-        await websocket.send_bytes(ulaw)
+        try:
+            pcm_8k, new_state = cls.resample(pcm_data, cls.OUTPUT_RATE, cls.INPUT_RATE, state)
+            ulaw = cls.pcm_to_ulaw(pcm_8k)
+            await websocket.send_bytes(ulaw)
+            return ulaw, new_state
+        except Exception as e:
+            logger.error(f"TelnyxTransport.send_pcm error: {e}")
+            return b"", state

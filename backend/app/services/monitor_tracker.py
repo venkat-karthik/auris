@@ -52,25 +52,29 @@ class MonitorTracker:
 
     @classmethod
     def remove_listener(cls, websocket: WebSocket):
-        cls.listeners.remove(websocket)
+        cls.listeners.discard(websocket)
 
     @classmethod
     def broadcast(cls, message: Dict[str, Any]):
         if not cls.listeners:
             return
-        
-        # Run broadcasts concurrently to avoid blocking
+
+        # Run broadcasts concurrently inside the running event loop.
+        # get_event_loop() works here because this method is always called
+        # from within an async context (route handlers / websocket handlers).
         async def send_to_all():
             disconnected = []
-            for ws in cls.listeners:
+            for ws in list(cls.listeners):
                 try:
                     await ws.send_json(message)
                 except Exception:
                     disconnected.append(ws)
             for ws in disconnected:
-                try:
-                    cls.listeners.remove(ws)
-                except Exception:
-                    pass
+                cls.listeners.discard(ws)
 
-        asyncio.create_task(send_to_all())
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(send_to_all())
+        except Exception as e:
+            logger.debug(f"MonitorTracker.broadcast skipped (no event loop): {e}")

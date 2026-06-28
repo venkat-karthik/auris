@@ -359,6 +359,12 @@ async def websocket_call(
 
     start_time = datetime.now(UTC)
 
+    # Start credit monitor loop in background
+    cost_tier = agent.model_config.get("cost_tier", "standard")
+    monitor_task = asyncio.create_task(
+        credit_monitor_loop(run_id, agent.org_id, cost_tier, pipeline, websocket)
+    )
+
     try:
         await pipeline.start()
         await transport.run()
@@ -367,7 +373,11 @@ async def websocket_call(
     except Exception as e:
         logger.error(f"WebRTC call error: run={run_id} error={e}")
     finally:
-        await pipeline.stop()
+        monitor_task.cancel()
+        try:
+            await pipeline.stop()
+        except Exception:
+            pass
         from app.services.monitor_tracker import MonitorTracker
         MonitorTracker.end_call(run_id)
         end_time = datetime.now(UTC)
@@ -537,4 +547,79 @@ async def send_dtmf(
     await db.commit()
     
     return {"success": True, "digits": ctx["dtmf_digits"]}
+
+
+async def credit_monitor_loop(run_id: int, org_id: int, cost_tier: str, pipeline, websocket):
+    """
+    Monitors the organization's credit balance in real-time.
+    Checks and deducts credits every 10 seconds of active call.
+    Deducts credits directly in the DB to prevent double-spending.
+    Closes the pipeline and WebSocket if balance reaches 0.
+    """
+    if cost_tier == "economy":
+        price_per_second = 0.0004  # $0.024/min
+    elif cost_tier == "premium":
+        price_per_second = 0.0016  # $0.096/min
+    else:
+        price_per_second = 0.0008  # $0.048/min (Standard)
+        
+    credits_per_second = price_per_second * 83.0  # 1 USD = 83 INR/credits
+    interval = 10.0  # Check every 10 seconds
+    credits_per_interval = credits_per_second * interval
+
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            
+            async with AsyncSessionLocal() as db:
+                from app.models.organization import Organization
+                org_result = await db.execute(
+                    select(Organization).where(Organization.id == org_id)
+                )
+                org = org_result.scalar_one_or_none()
+                if not org:
+                    logger.error(f"Credit Monitor: Org {org_id} not found. Terminating call.")
+                    break
+                
+                balance = org.balance_credits or 0.0
+                if balance <= 0.0:
+                    logger.warning(f"Credit Monitor: Org {org_id} balance is {balance}. Terminating call.")
+                    from app.services.pipeline.frame import Frame, FrameType
+                    await pipeline.push(Frame(type=FrameType.CALL_END))
+                    try:
+                        await websocket.close(code=4002)
+                    except Exception:
+                        pass
+                    break
+                
+                deducted = min(balance, credits_per_interval)
+                org.balance_credits = max(0.0, balance - deducted)
+                logger.info(f"Credit Monitor: Deducted {deducted:.4f} credits from Org {org_id}. New balance: {org.balance_credits:.4f}")
+                
+                run_result = await db.execute(
+                    select(CallRun).where(CallRun.id == run_id)
+                )
+                run = run_result.scalar_one_or_none()
+                if run:
+                    run.credits_used = (run.credits_used or 0.0) + deducted
+                    run.cost_usd = (run.cost_usd or 0.0) + (deducted / 83.0)
+                    db.add(run)
+                
+                db.add(org)
+                await db.commit()
+                
+                if org.balance_credits <= 0.0:
+                    logger.warning(f"Credit Monitor: Org {org_id} credits depleted. Terminating call.")
+                    from app.services.pipeline.frame import Frame, FrameType
+                    await pipeline.push(Frame(type=FrameType.CALL_END))
+                    try:
+                        await websocket.close(code=4002)
+                    except Exception:
+                        pass
+                    break
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error(f"Credit Monitor error: {e}")
+
 

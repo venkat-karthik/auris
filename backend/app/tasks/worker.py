@@ -19,6 +19,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.call_run import CallRun
 from app.models.agent import Agent
 from app.models.organization import Organization
+from app.models.campaign import Campaign, CampaignContact
 from app.services.customer_memory import upsert_customer
 
 
@@ -134,22 +135,28 @@ async def process_call_completion(ctx, call_run_id: int):
                 price_per_second = 0.0008  # $0.048/min (Standard)
 
         duration = run.duration_seconds or 0.0
-        cost_usd = duration * price_per_second
+        total_cost_usd = duration * price_per_second
         
         # 1 USD = 83 credits (INR) conversion
-        credits_used = cost_usd * 83.0
+        total_credits = total_cost_usd * 83.0
         
-        run.cost_usd = cost_usd
-        run.credits_used = credits_used
+        # Calculate remaining credits to deduct (subtracting what was already deducted in real-time)
+        already_deducted = run.credits_used or 0.0
+        credits_to_deduct = max(0.0, total_credits - already_deducted)
+        
+        run.cost_usd = total_cost_usd
+        run.credits_used = total_credits
         
         # Deduct from organization balance
-        org.balance_credits = max(0.0, org.balance_credits - credits_used)
+        org.balance_credits = max(0.0, org.balance_credits - credits_to_deduct)
         
         db.add(run)
         db.add(org)
         await db.commit()
         
-        logger.info(f"ARQ: Deducted {credits_used:.2f} credits for call={call_run_id}. New balance: {org.balance_credits:.2f}")
+        logger.info(f"ARQ: Deducted {credits_to_deduct:.2f} remaining credits for call={call_run_id} "
+                    f"(total={total_credits:.2f}, already_deducted={already_deducted:.2f}). "
+                    f"New balance: {org.balance_credits:.2f}")
 
 
 async def update_customer_profile(ctx, call_run_id: int):
@@ -229,11 +236,31 @@ async def dial_next_contacts(ctx, campaign_id: int):
             logger.info(f"ARQ: Campaign={campaign_id} is not active (status={campaign.status if campaign else 'none'})")
             return
 
-        # Fetch up to 3 pending contacts to call in this batch
+        # Check active concurrent calls for this campaign
+        active_select = (
+            select(CampaignContact)
+            .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "in_progress")
+        )
+        active_result = await db.execute(active_select)
+        active_calls = active_result.scalars().all()
+        
+        MAX_CONCURRENT_CALLS = 5
+        available_slots = MAX_CONCURRENT_CALLS - len(active_calls)
+        
+        if available_slots <= 0:
+            logger.info(f"ARQ: Campaign={campaign_id} is at maximum concurrency ({len(active_calls)}/{MAX_CONCURRENT_CALLS} active). Deferring next check.")
+            redis_pool = ctx.get("redis")
+            if redis_pool:
+                await redis_pool.enqueue_job("dial_next_contacts", campaign_id, _defer_by=5)
+            return
+
+        batch_size = min(3, available_slots)
+
+        # Fetch up to `batch_size` pending contacts to call in this batch
         contacts_select = (
             select(CampaignContact)
             .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "pending")
-            .limit(3)
+            .limit(batch_size)
         )
         contacts_result = await db.execute(contacts_select)
         contacts = contacts_result.scalars().all()

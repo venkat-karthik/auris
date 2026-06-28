@@ -18,3 +18,4 @@ class PhoneNumber(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     agent = relationship("Agent")
+    org = relationship("Organization", back_populates="phone_numbers")

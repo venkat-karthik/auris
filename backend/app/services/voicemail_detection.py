@@ -1,68 +1,87 @@
 # backend/app/services/voicemail_detection.py
 """Voicemail detection service.
 
-Detects whether an audio snippet is a voicemail greeting using OpenAI Whisper as the primary
-provider and falls back to Google Speech‑to‑Text if Whisper is unavailable or the confidence
-is low.
-
-The service is deliberately lightweight for unit‑testing – external API calls are
-performed in separate helper functions that can be mocked.
+Detects whether an audio snippet is a voicemail greeting using OpenAI Whisper
+(via the current openai >= 1.0 SDK) as the primary provider and falls back to
+Google Speech-to-Text if available.
 """
 
+import io
 import os
 from typing import Dict
 
-# OpenAI Whisper
-import openai  # type: ignore
-
-# Google Speech‑to‑Text (optional)
+# Google Speech-to-Text (optional)
 try:
     from google.cloud import speech  # type: ignore
 except Exception:  # pragma: no cover
     speech = None  # type: ignore
 
+VOICEMAIL_KEYWORDS = [
+    "please leave a message",
+    "voicemail",
+    "recording",
+    "leave a message after the tone",
+    "not available",
+    "after the beep",
+]
+
 
 class VoicemailDetector:
-    """Detect voicemail in an audio byte stream.
+    """Detect voicemail in a raw PCM byte stream.
 
     Returns a dictionary with:
         - "is_voicemail": bool
-        - "transcript": str (the transcribed text)
+        - "transcript": str
     """
 
     @staticmethod
     async def detect(audio_bytes: bytes) -> Dict[str, object]:
-        # Try OpenAI Whisper first
-        try:
-            openai_api_key = os.getenv("OPENAI_API_KEY")
-            if not openai_api_key:
-                raise RuntimeError("OPENAI_API_KEY not set")
-            # The OpenAI SDK expects a file‑like object
-            # Use a temporary file via BytesIO
-            from io import BytesIO
+        openai_api_key = os.getenv("OPENAI_API_KEY")
 
-            audio_file = BytesIO(audio_bytes)
-            # openai.Audio.transcribe returns a dict with "text"
-            result = await openai.Audio.atranscribe("whisper-1", audio_file)
-            transcript = result.get("text", "").strip()
-            # Very naive heuristic: if the transcript contains typical voicemail cues
-            is_voicemail = any(keyword in transcript.lower() for keyword in ["please leave a message", "voicemail", "recording", "leave a message after the tone"])
-            return {"is_voicemail": is_voicemail, "transcript": transcript}
-        except Exception as e:  # pragma: no cover
-            # Whisper failed – fall back to Google if available
-            if speech is None:
-                # No fallback available – re‑raise original error
-                raise e
-            # Google Speech‑to‑Text expects raw audio bytes and a config
-            client = speech.SpeechClient()
-            audio = speech.RecognitionAudio(content=audio_bytes)
-            config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                language_code="en-US",
-                enable_automatic_punctuation=True,
-            )
-            response = client.recognize(config=config, audio=audio)
-            transcripts = [result.alternatives[0].transcript for result in response.results]
-            transcript = " ".join(transcripts).strip()
-            is_voicemail = any(keyword in transcript.lower() for keyword in ["please leave a message", "voicemail", "recording", "leave a message after the tone"])
-            return {"is_voicemail": is_voicemail, "transcript": transcript}
+        # ── OpenAI Whisper (SDK >= 1.0) ───────────────────────────────────────
+        if openai_api_key:
+            try:
+                from openai import AsyncOpenAI
+
+                client = AsyncOpenAI(api_key=openai_api_key)
+
+                # The SDK requires a file-like object with a `.name` attribute
+                # so it can infer the audio format (we send raw PCM as .wav).
+                audio_file = io.BytesIO(audio_bytes)
+                audio_file.name = "audio.wav"
+
+                transcription = await client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                )
+                transcript = transcription.text.strip() if transcription.text else ""
+                is_voicemail = any(kw in transcript.lower() for kw in VOICEMAIL_KEYWORDS)
+                return {"is_voicemail": is_voicemail, "transcript": transcript}
+            except Exception as e:  # pragma: no cover
+                # Fall through to Google fallback
+                pass
+
+        # ── Google Speech-to-Text fallback ────────────────────────────────────
+        if speech is not None:
+            try:
+                g_client = speech.SpeechClient()
+                audio = speech.RecognitionAudio(content=audio_bytes)
+                config = speech.RecognitionConfig(
+                    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                    language_code="en-US",
+                    enable_automatic_punctuation=True,
+                )
+                response = g_client.recognize(config=config, audio=audio)
+                transcripts = [
+                    result.alternatives[0].transcript
+                    for result in response.results
+                    if result.alternatives
+                ]
+                transcript = " ".join(transcripts).strip()
+                is_voicemail = any(kw in transcript.lower() for kw in VOICEMAIL_KEYWORDS)
+                return {"is_voicemail": is_voicemail, "transcript": transcript}
+            except Exception:
+                pass
+
+        # ── No provider available ─────────────────────────────────────────────
+        return {"is_voicemail": False, "transcript": ""}
