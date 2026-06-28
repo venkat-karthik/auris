@@ -3,7 +3,7 @@ Auris - Analytics routes
 Provides statistics and data for the frontend dashboards.
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 
@@ -52,10 +52,10 @@ async def get_agent_analytics(
             func.avg(CallRun.duration_seconds).label("avg_duration"),
             func.sum(CallRun.cost_usd).label("total_cost"),
             # Count voicemails
-            func.sum(func.case((CallRun.voicemail == "true", 1), else_=0)).label("voicemail_count"),
+            func.sum(case((CallRun.voicemail == "true", 1), else_=0)).label("voicemail_count"),
             # Count conversions / successful dispositions
             func.sum(
-                func.case(
+                case(
                     (
                         CallRun.disposition.in_(["success", "converted", "sale", "completed_survey", "booked"]),
                         1

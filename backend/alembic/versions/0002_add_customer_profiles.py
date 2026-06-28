@@ -22,7 +22,7 @@ def upgrade() -> None:
         sa.Column("last_call_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("call_count", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("summary", sa.Text(), nullable=True),
-        sa.Column("preferences", sa.JSON(), nullable=False, server_default="'{}'"),
+        sa.Column("preferences", sa.JSON(), nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["org_id"], ["organizations.id"], ondelete="CASCADE"),
         sa.UniqueConstraint("org_id", "phone_number", name="uq_org_customer_phone")
