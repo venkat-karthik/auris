@@ -17,6 +17,7 @@ from app.routes.telephony import router as telephony_router
 from app.routes.knowledge_base import router as knowledge_base_router
 from app.routes.campaigns import router as campaigns_router
 from app.routes.api_keys import router as api_keys_router
+from app.routes.phone_numbers import router as phone_numbers_router
 from app.dependencies.rate_limit import check_rate_limit
 
 
@@ -57,6 +58,7 @@ app.include_router(billing_router, prefix=API_PREFIX, dependencies=[Depends(chec
 app.include_router(knowledge_base_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(campaigns_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(api_keys_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(phone_numbers_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 
 
 @app.get("/api/v1/health")

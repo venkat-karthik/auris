@@ -8,6 +8,7 @@ from app.models.user import User
 from app.models.customer_profile import CustomerProfile
 from app.models.knowledge_base import KnowledgeBaseDocument, KnowledgeBaseChunk
 from app.models.campaign import Campaign, CampaignContact
+from app.models.phone_number import PhoneNumber
 
 __all__ = [
     "User",
@@ -22,4 +23,5 @@ __all__ = [
     "KnowledgeBaseChunk",
     "Campaign",
     "CampaignContact",
+    "PhoneNumber",
 ]

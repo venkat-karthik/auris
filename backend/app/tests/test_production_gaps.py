@@ -154,3 +154,61 @@ async def test_email_verification_flow(client: AsyncClient, db_session: AsyncSes
     login_resp2 = await client.post("/api/v1/auth/login", json=login_payload)
     assert login_resp2.status_code == 200
     assert "access_token" in login_resp2.json()
+
+
+@pytest.mark.asyncio
+async def test_phone_number_leasing_and_binding(client: AsyncClient, db_session: AsyncSession, test_org, test_user):
+    with (
+        patch("app.dependencies.auth.get_current_org", return_value=test_org),
+        patch("app.dependencies.auth.get_current_user", return_value=test_user)
+    ):
+        # Set org balance to have enough credits
+        test_org.balance_credits = 500.0
+        await db_session.commit()
+
+        # 1. Search available numbers
+        search_resp = await client.get("/api/v1/phone-numbers/search?area_code=830")
+        assert search_resp.status_code == 200
+        available = search_resp.json()
+        assert len(available) >= 1
+        phone_to_buy = available[0]["phone_number"]
+
+        # 2. Buy/lease the number
+        buy_payload = {"phone_number": phone_to_buy, "label": "Support Desk Line"}
+        buy_resp = await client.post("/api/v1/phone-numbers/buy", json=buy_payload)
+        assert buy_resp.status_code == 200
+        bought_data = buy_resp.json()
+        assert bought_data["phone_number"] == phone_to_buy
+        assert bought_data["label"] == "Support Desk Line"
+        number_id = bought_data["id"]
+
+        # Org balance should be reduced (500 - 160 = 340)
+        assert test_org.balance_credits == 340.0
+
+        # 3. List leased numbers
+        list_resp = await client.get("/api/v1/phone-numbers")
+        assert list_resp.status_code == 200
+        numbers = list_resp.json()
+        assert any(n["id"] == number_id for n in numbers)
+
+        # 4. Bind number to agent
+        # Create a dummy agent first
+        from app.models.agent import Agent
+        dummy_agent = Agent(org_id=test_org.id, name="Telnyx Inbound Assistant")
+        db_session.add(dummy_agent)
+        await db_session.commit()
+
+        bind_payload = {"agent_id": dummy_agent.id}
+        bind_resp = await client.put(f"/api/v1/phone-numbers/{number_id}/bind", json=bind_payload)
+        assert bind_resp.status_code == 200
+        bound_data = bind_resp.json()
+        assert bound_data["agent_id"] == dummy_agent.id
+        assert bound_data["agent_name"] == "Telnyx Inbound Assistant"
+
+        # 5. Release number
+        del_resp = await client.delete(f"/api/v1/phone-numbers/{number_id}")
+        assert del_resp.status_code == 200
+
+        # Verify number list is empty again
+        list_resp2 = await client.get("/api/v1/phone-numbers")
+        assert len(list_resp2.json()) == 0
