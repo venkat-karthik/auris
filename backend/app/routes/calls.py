@@ -5,13 +5,19 @@ WebSocket endpoint for browser voice calls + REST for call history.
 import asyncio
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
 from loguru import logger
+from fastapi.responses import FileResponse
+
 from pydantic import BaseModel
+import os
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal, get_db
+from app.core.config import RECORDINGS_DIR
+from app.services.transfer_manager import warm_transfer
 from app.dependencies.auth import get_current_org, get_current_user
 from app.models.agent import Agent
 from app.models.call_run import CallRun
@@ -38,6 +44,9 @@ class CallRunResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class WarmTransferRequest(BaseModel):
+    target_agent_id: int
+    whisper_url: Optional[str] = None
 
 @router.get("", response_model=list[CallRunResponse])
 async def list_calls(
@@ -423,3 +432,51 @@ async def get_call_transcript(
     except Exception as e:
         logger.error(f"Failed to read transcript file from {run.transcript_path}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve transcript file")
+
+@router.post("/{call_id}/warm_transfer")
+async def warm_transfer_endpoint(
+    call_id: int,
+    req: WarmTransferRequest,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    # Verify call belongs to organization
+    result = await db.execute(select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id))
+    call = result.scalar_one_or_none()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    success = await warm_transfer(call_id, req.target_agent_id, req.whisper_url)
+    return {"success": success}
+
+@router.post("/{call_id}/recording")
+async def upload_recording(
+    call_id: int,
+    file: UploadFile = File(...),
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id))
+    call = result.scalar_one_or_none()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    os.makedirs(RECORDINGS_DIR, exist_ok=True)
+    filename = f"{call_id}_{file.filename}"
+    file_path = os.path.join(RECORDINGS_DIR, filename)
+    content = await file.read()
+    with open(file_path, "wb") as out:
+        out.write(content)
+    call.recording_path = file_path
+    await db.commit()
+    return {"recording_path": file_path}
+
+@router.get("/{call_id}/recording")
+async def get_recording(
+    call_id: int,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id))
+    call = result.scalar_one_or_none()
+    if not call or not call.recording_path:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return FileResponse(call.recording_path, media_type="audio/mpeg")

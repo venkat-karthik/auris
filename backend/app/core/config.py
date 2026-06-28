@@ -34,6 +34,8 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "auris-audio")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
+# Directory for local call recordings (used when STORAGE_BACKEND is local)
+RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", "/app/recordings")
 
 # ── AI Providers ──────────────────────────────────────────────────────────────
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

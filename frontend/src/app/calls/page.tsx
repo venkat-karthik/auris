@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/Providers";
+import Link from "next/link";
 import DashboardLayout from "@/components/DashboardLayout";
 import { toast } from "sonner";
 import {
@@ -108,6 +109,7 @@ export default function CallLogsPage() {
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
             <PhoneCall className="text-teal-500 w-8 h-8" /> Call Logs
           </h1>
+          <Link href="/builder" className="inline-block mt-2 text-teal-600 hover:underline">Go to Workflow Builder</Link>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Review detailed reports of inbound and WebRTC browser calls, including duration and user response transcripts.
           </p>

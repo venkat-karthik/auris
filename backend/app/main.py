@@ -4,7 +4,9 @@ Auris - Main FastAPI Application
 """
 from contextlib import asynccontextmanager
 
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI, Depends
+# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 

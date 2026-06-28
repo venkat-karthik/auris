@@ -38,6 +38,7 @@ class CallRun(Base):
     # Storage paths
     recording_path = Column(String, nullable=True)
     transcript_path = Column(String, nullable=True)
+    voicemail = Column(String, nullable=True)  # store 'true'/'false' or use Boolean if DB supports
 
     # Context injected at call start (template variable values)
     initial_context = Column(JSON, nullable=False, default=dict)
