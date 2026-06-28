@@ -6,6 +6,8 @@ from app.models.call_run import CallRun
 from app.models.organization import OrgMember, Organization
 from app.models.user import User
 from app.models.customer_profile import CustomerProfile
+from app.models.knowledge_base import KnowledgeBaseDocument, KnowledgeBaseChunk
+from app.models.campaign import Campaign, CampaignContact
 
 __all__ = [
     "User",
@@ -16,4 +18,8 @@ __all__ = [
     "CallRun",
     "CreditTransaction",
     "CustomerProfile",
+    "KnowledgeBaseDocument",
+    "KnowledgeBaseChunk",
+    "Campaign",
+    "CampaignContact",
 ]

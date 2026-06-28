@@ -29,13 +29,25 @@ class ElevenLabsTTS(BaseProcessor):
         self.voice_id = voice_id
         self.model = model
         self.sample_rate = sample_rate
+        self._tts_task = None
 
     async def process_frame(self, frame: Frame) -> None:
+        import asyncio
+
         if frame.type == FrameType.LLM_TEXT_COMPLETE:
             text = (frame.data or {}).get("text", "").strip()
             if text:
-                await self._synthesize(text)
+                if self._tts_task and not self._tts_task.done():
+                    self._tts_task.cancel()
+                self._tts_task = asyncio.create_task(self._synthesize(text))
             await self.emit(frame)  # Pass through so downstream knows TTS is done
+
+        elif frame.type == FrameType.USER_SPEAKING:
+            # User interrupted agent - cancel current TTS synthesis
+            if self._tts_task and not self._tts_task.done():
+                self._tts_task.cancel()
+                logger.info("ElevenLabsTTS: Canceled current active TTS stream due to USER_SPEAKING")
+            await self.emit(frame)
 
         else:
             await self.emit(frame)

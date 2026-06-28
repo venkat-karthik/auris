@@ -75,7 +75,10 @@ def build_pipeline(
         voice_id = tts_cfg.get("voice_id", ElevenLabsTTS.DEFAULT_VOICE_ID)
         tts = ElevenLabsTTS(api_key=tts_key, voice_id=voice_id)
 
-    return PipelineEngine(processors=[stt, llm, tts])
+    from app.services.pipeline.stt.vad import VADProcessor
+    vad = VADProcessor()
+
+    return PipelineEngine(processors=[vad, stt, llm, tts])
 
 
 # ── Defaults ──────────────────────────────────────────────────────────────────

@@ -35,12 +35,15 @@ class OpenAILLM(BaseProcessor):
         self.max_tokens = max_tokens
         self._messages: list[dict] = []
         self._tools: list[dict] = []
+        self._gen_task = None
 
     def set_tools(self, tools: list[dict]) -> None:
         """Set available tools for function calling."""
         self._tools = tools
 
     async def process_frame(self, frame: Frame) -> None:
+        import asyncio
+
         if frame.type == FrameType.CALL_START:
             # Initialize conversation with system prompt
             self._messages = [{"role": "system", "content": self.system_prompt}]
@@ -62,7 +65,11 @@ class OpenAILLM(BaseProcessor):
             if not text:
                 return
             self._messages.append({"role": "user", "content": text})
-            await self._generate()
+            
+            # Cancel existing task on new input (barge-in or next user turn)
+            if self._gen_task and not self._gen_task.done():
+                self._gen_task.cancel()
+            self._gen_task = asyncio.create_task(self._generate())
 
         elif frame.type == FrameType.TOOL_RESULT:
             data = frame.data or {}
@@ -71,7 +78,21 @@ class OpenAILLM(BaseProcessor):
                 "tool_call_id": data["call_id"],
                 "content": json.dumps(data["result"]),
             })
-            await self._generate()
+            if self._gen_task and not self._gen_task.done():
+                self._gen_task.cancel()
+            self._gen_task = asyncio.create_task(self._generate())
+
+        elif frame.type == FrameType.USER_SPEAKING:
+            # User interrupted agent - cancel current LLM generation task
+            if self._gen_task and not self._gen_task.done():
+                self._gen_task.cancel()
+                logger.info("OpenAILLM: Canceled current active generation due to USER_SPEAKING")
+            await self.emit(frame)
+
+        elif frame.type == FrameType.CALL_END:
+            if self._gen_task and not self._gen_task.done():
+                self._gen_task.cancel()
+            await self.emit(frame)
 
         else:
             await self.emit(frame)

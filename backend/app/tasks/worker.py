@@ -210,6 +210,75 @@ async def update_customer_profile(ctx, call_run_id: int):
             logger.error(f"ARQ: Customer upsert failed for call={call_run_id}: {e}")
 
 
+async def dial_next_contacts(ctx, campaign_id: int):
+    """
+    ARQ Background Task:
+    1. Loads Campaign, verifies status == "running".
+    2. Fetches next batch of pending contacts.
+    3. Triggers Telnyx out-dial for each contact in parallel.
+    4. Automatically schedules the next batch processing step.
+    """
+    logger.info(f"ARQ: Processing dialer queue for campaign={campaign_id}")
+    
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Campaign).where(Campaign.id == campaign_id)
+        )
+        campaign = result.scalar_one_or_none()
+        if not campaign or campaign.status != "running":
+            logger.info(f"ARQ: Campaign={campaign_id} is not active (status={campaign.status if campaign else 'none'})")
+            return
+
+        # Fetch up to 3 pending contacts to call in this batch
+        contacts_select = (
+            select(CampaignContact)
+            .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "pending")
+            .limit(3)
+        )
+        contacts_result = await db.execute(contacts_select)
+        contacts = contacts_result.scalars().all()
+
+        if not contacts:
+            # Check if there are any remaining in-progress contacts
+            check_running = await db.execute(
+                select(CampaignContact)
+                .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "in_progress")
+            )
+            if not check_running.scalars().all():
+                campaign.status = "completed"
+                await db.commit()
+                logger.info(f"ARQ: Campaign={campaign_id} completed (all numbers dialed)")
+            return
+
+        # Mark them as in_progress immediately to avoid double dialing
+        for contact in contacts:
+            contact.status = "in_progress"
+            contact.attempts += 1
+            contact.last_attempt_at = datetime.now(UTC)
+            db.add(contact)
+        await db.commit()
+
+        # Run dial outs
+        from app.services.dialer_service import dial_number
+        for contact in contacts:
+            success = await dial_number(db, contact.id)
+            if not success:
+                # If initiation fails, mark it failed immediately
+                async with AsyncSessionLocal() as session:
+                    contact_result = await session.execute(
+                        select(CampaignContact).where(CampaignContact.id == contact.id)
+                    )
+                    c = contact_result.scalar_one_or_none()
+                    if c:
+                        c.status = "failed"
+                        await session.commit()
+
+        # Defer next batch loop check in 5 seconds
+        redis_pool = ctx.get("redis")
+        if redis_pool:
+            await redis_pool.enqueue_job("dial_next_contacts", campaign_id, _defer_by=5)
+
+
 # ── ARQ Settings ─────────────────────────────────────────────────────────────
 
 # Parse Redis Settings
@@ -227,5 +296,5 @@ except Exception as ex:
     arq_redis_settings = RedisSettings()
 
 class WorkerSettings:
-    functions = [process_call_completion, update_customer_profile]
+    functions = [process_call_completion, update_customer_profile, dial_next_contacts]
     redis_settings = arq_redis_settings

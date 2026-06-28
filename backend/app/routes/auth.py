@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import create_access_token, hash_password, verify_password
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, get_current_org
 from app.models.organization import OrgMember, Organization
 from app.models.user import User
 
@@ -116,3 +116,29 @@ async def me(user: User = Depends(get_current_user)):
         is_superuser=user.is_superuser,
         selected_org_id=user.selected_org_id,
     )
+
+
+class OrganizationUpdate(BaseModel):
+    name: str
+
+
+class OrganizationResponse(BaseModel):
+    id: int
+    name: str
+    slug: str
+    balance_credits: float
+
+    class Config:
+        from_attributes = True
+
+
+@router.put("/organization", response_model=OrganizationResponse)
+async def update_organization(
+    payload: OrganizationUpdate,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    org.name = payload.name
+    await db.commit()
+    await db.refresh(org)
+    return org

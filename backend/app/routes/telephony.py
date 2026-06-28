@@ -32,7 +32,17 @@ async def telnyx_ws(
     agent = result.scalars().first()
     if not agent:
         await websocket.close(code=1008)
-        raise HTTPException(status_code=404, detail="Agent not found for organization")
+        return
+    
+    # Check organization credit balance
+    from app.models.organization import Organization
+    org_result = await db.execute(
+        select(Organization).where(Organization.id == org_id)
+    )
+    org = org_result.scalar_one_or_none()
+    if not org or (org.balance_credits or 0.0) <= 0.0:
+        await websocket.close(code=4002)
+        return
     
     # Look up repeat caller info for prompt injection
     from app.services.customer_memory import lookup_customer
@@ -54,7 +64,19 @@ async def telnyx_ws(
     await db.refresh(run)
     run_id = run.id
 
-    system_prompt = agent.description or ""
+    has_visual_nodes = len(agent.graph.get("nodes", [])) > 0
+    workflow_state = None
+    if has_visual_nodes:
+        from app.services.pipeline.workflow_engine import WorkflowState
+        workflow_state = WorkflowState(agent.graph, context_variables=agent.context_variables)
+        system_prompt, should_end = await workflow_state.execute_active_node()
+        if should_end:
+            await websocket.close(code=1000)
+            return
+    else:
+        from app.routes.calls import _extract_system_prompt
+        system_prompt = _extract_system_prompt(agent.graph)
+
     if customer_context:
         system_prompt += customer_context
 
@@ -62,6 +84,70 @@ async def telnyx_ws(
     
     # Build pipeline based on agent config
     pipeline = build_pipeline(agent.model_config, system_prompt=system_prompt, language=language)
+
+    # Find LLM processor and register tools
+    llm_processor = None
+    for p in pipeline.processors:
+        if p.name in ("openai-llm", "groq-llm"):
+            llm_processor = p
+            break
+
+    tools = []
+    # Register search_knowledge_base if organization has documents
+    async with AsyncSessionLocal() as session:
+        from app.models.knowledge_base import KnowledgeBaseDocument
+        doc_select = select(KnowledgeBaseDocument).where(
+            KnowledgeBaseDocument.org_id == agent.org_id,
+            (KnowledgeBaseDocument.agent_id == agent.id) | (KnowledgeBaseDocument.agent_id.is_(None))
+        )
+        doc_res = await session.execute(doc_select)
+        has_docs = len(doc_res.scalars().all()) > 0
+
+    if has_docs:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "search_knowledge_base",
+                "description": "Search the knowledge base for documentation, guides, company policies to answer customer queries.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search term or query containing relevant keywords."}
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
+
+    if workflow_state:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "submit_customer_answer",
+                "description": "Submit a validated answer to the question asked, updating the context and transitioning call state.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string", "description": "The extracted value / answer from customer's speech."}
+                    },
+                    "required": ["value"]
+                }
+            }
+        })
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "end_call",
+                "description": "Terminate the call immediately.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+
+    if llm_processor and tools:
+        llm_processor.set_tools(tools)
     
     transcript_segments = []
 
@@ -79,6 +165,50 @@ async def telnyx_ws(
                 text = data.get("text", "").strip()
                 if text:
                     transcript_segments.append(f"Agent: {text}")
+            elif frame.type == FrameType.TOOL_CALL:
+                # Intercept tool calls, execute them, and push back TOOL_RESULT
+                data = frame.data or {}
+                name = data.get("name")
+                args = data.get("arguments", {})
+                call_id = data.get("call_id")
+                result = None
+
+                if name == "search_knowledge_base":
+                    query = args.get("query", "")
+                    async with AsyncSessionLocal() as session:
+                        from app.services.rag_service import retrieve_context
+                        result = await retrieve_context(session, agent.id, agent.org_id, query)
+                elif name == "submit_customer_answer" and workflow_state:
+                    val = args.get("value", "")
+                    active_node = workflow_state.get_active_node()
+                    if active_node and active_node.get("type") == "qa":
+                        var_name = active_node.get("data", {}).get("expected_variable", "qa_ans")
+                        workflow_state.context[var_name] = val
+                    next_node = workflow_state.transition_to_next()
+                    if next_node:
+                        from app.services.pipeline.frame import Frame
+                        new_prompt, should_end = await workflow_state.execute_active_node()
+                        if should_end:
+                            await pipeline.push(Frame(type=FrameType.CALL_END))
+                            result = {"status": "call_ended"}
+                        else:
+                            if llm_processor:
+                                llm_processor.system_prompt = new_prompt
+                                llm_processor._messages.append({
+                                    "role": "system",
+                                    "content": f"[SYSTEM NOTICE: Workflow state changed. Active Prompt is now:\n{new_prompt}]"
+                                })
+                            result = {"status": "success", "next_node": next_node.get("id")}
+                    else:
+                        result = {"status": "success", "next_node": None}
+                elif name == "end_call":
+                    from app.services.pipeline.frame import Frame
+                    await pipeline.push(Frame(type=FrameType.CALL_END))
+                    result = {"status": "call_ended"}
+
+                if result is not None:
+                    from app.services.pipeline.frame import Frame
+                    await pipeline.push(Frame(type=FrameType.TOOL_RESULT, data={"call_id": call_id, "result": result}))
         return frame
 
     start_time = datetime.now(UTC)
@@ -159,7 +289,9 @@ async def inbound_telnyx(
     from_number: str | None = Query(None, alias="from"),
     to_number: str | None = Query(None, alias="to"),
 ):
-    ws_url = f"wss://api.example.com/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}&org_id={org_id}&agent_id={agent_id}"
+    from app.core.config import BACKEND_URL
+    ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = f"{ws_base}/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}&org_id={org_id}&agent_id={agent_id}"
     if from_number:
         ws_url += f"&from={from_number}"
     if to_number:

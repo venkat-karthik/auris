@@ -133,6 +133,16 @@ async def websocket_call(
             await websocket.close()
             return
 
+        # Check organization credit balance
+        org_result = await db.execute(
+            select(Organization).where(Organization.id == agent.org_id)
+        )
+        org = org_result.scalar_one_or_none()
+        if not org or (org.balance_credits or 0.0) <= 0.0:
+            await websocket.send_json({"type": "error", "message": "Insufficient credit balance. Please recharge."})
+            await websocket.close(code=4002)
+            return
+
         # Look up repeat caller info for prompt injection
         from app.services.customer_memory import lookup_customer
         customer_context = await lookup_customer(db, agent.org_id, caller_number)
@@ -157,7 +167,19 @@ async def websocket_call(
 
     # Build the pipeline
     # Extract system prompt from agent graph (first node or top-level prompt)
-    system_prompt = _extract_system_prompt(agent.graph)
+    has_visual_nodes = len(agent.graph.get("nodes", [])) > 0
+    workflow_state = None
+    if has_visual_nodes:
+        from app.services.pipeline.workflow_engine import WorkflowState
+        workflow_state = WorkflowState(agent.graph, context_variables=agent.context_variables)
+        system_prompt, should_end = await workflow_state.execute_active_node()
+        if should_end:
+            await websocket.send_json({"type": "end"})
+            await websocket.close()
+            return
+    else:
+        system_prompt = _extract_system_prompt(agent.graph)
+
     if customer_context:
         system_prompt += customer_context
     language = agent.model_config.get("language", "en")
@@ -168,7 +190,71 @@ async def websocket_call(
         language=language,
     )
 
-    from app.services.pipeline.frame import FrameType
+    # Find LLM processor and register tools
+    llm_processor = None
+    for p in pipeline.processors:
+        if p.name in ("openai-llm", "groq-llm"):
+            llm_processor = p
+            break
+
+    tools = []
+    # Register search_knowledge_base if organization has documents
+    async with AsyncSessionLocal() as session:
+        from app.models.knowledge_base import KnowledgeBaseDocument
+        doc_select = select(KnowledgeBaseDocument).where(
+            KnowledgeBaseDocument.org_id == agent.org_id,
+            (KnowledgeBaseDocument.agent_id == agent.id) | (KnowledgeBaseDocument.agent_id.is_(None))
+        )
+        doc_res = await session.execute(doc_select)
+        has_docs = len(doc_res.scalars().all()) > 0
+
+    if has_docs:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "search_knowledge_base",
+                "description": "Search the knowledge base for documentation, guides, company policies to answer customer queries.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search term or query containing relevant keywords."}
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
+
+    if workflow_state:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "submit_customer_answer",
+                "description": "Submit a validated answer to the question asked, updating the context and transitioning call state.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string", "description": "The extracted value / answer from customer's speech."}
+                    },
+                    "required": ["value"]
+                }
+            }
+        })
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "end_call",
+                "description": "Terminate the call immediately.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+
+    if llm_processor and tools:
+        llm_processor.set_tools(tools)
+
+    from app.services.pipeline.frame import FrameType, Frame
     transcript_segments = []
 
     async def collecting_wrapper():
@@ -185,6 +271,47 @@ async def websocket_call(
                 text = data.get("text", "").strip()
                 if text:
                     transcript_segments.append(f"Agent: {text}")
+            elif frame.type == FrameType.TOOL_CALL:
+                # Intercept tool calls, execute them, and push back TOOL_RESULT
+                data = frame.data or {}
+                name = data.get("name")
+                args = data.get("arguments", {})
+                call_id = data.get("call_id")
+                result = None
+
+                if name == "search_knowledge_base":
+                    query = args.get("query", "")
+                    async with AsyncSessionLocal() as session:
+                        from app.services.rag_service import retrieve_context
+                        result = await retrieve_context(session, agent.id, agent.org_id, query)
+                elif name == "submit_customer_answer" and workflow_state:
+                    val = args.get("value", "")
+                    active_node = workflow_state.get_active_node()
+                    if active_node and active_node.get("type") == "qa":
+                        var_name = active_node.get("data", {}).get("expected_variable", "qa_ans")
+                        workflow_state.context[var_name] = val
+                    next_node = workflow_state.transition_to_next()
+                    if next_node:
+                        new_prompt, should_end = await workflow_state.execute_active_node()
+                        if should_end:
+                            await pipeline.push(Frame(type=FrameType.CALL_END))
+                            result = {"status": "call_ended"}
+                        else:
+                            if llm_processor:
+                                llm_processor.system_prompt = new_prompt
+                                llm_processor._messages.append({
+                                    "role": "system",
+                                    "content": f"[SYSTEM NOTICE: Workflow state changed. Active Prompt is now:\n{new_prompt}]"
+                                })
+                            result = {"status": "success", "next_node": next_node.get("id")}
+                    else:
+                        result = {"status": "success", "next_node": None}
+                elif name == "end_call":
+                    await pipeline.push(Frame(type=FrameType.CALL_END))
+                    result = {"status": "call_ended"}
+
+                if result is not None:
+                    await pipeline.push(Frame(type=FrameType.TOOL_RESULT, data={"call_id": call_id, "result": result}))
         return frame
 
     transport = WebRTCTransport(
@@ -265,3 +392,34 @@ def _extract_system_prompt(graph: dict) -> str:
             return node.get("prompt", "You are a helpful voice assistant.")
 
     return "You are a helpful voice assistant. Be concise and friendly."
+
+
+@router.get("/{call_id}/transcript")
+async def get_call_transcript(
+    call_id: int,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    if not run.transcript_path:
+        return {"id": call_id, "transcript": ""}
+
+    try:
+        from app.tasks.worker import download_file_from_minio
+        from app.core.config import MINIO_BUCKET
+        path = run.transcript_path
+        if path.startswith(f"{MINIO_BUCKET}/"):
+            path = path[len(f"{MINIO_BUCKET}/"):]
+            
+        transcript_bytes = download_file_from_minio(MINIO_BUCKET, path)
+        transcript_text = transcript_bytes.decode("utf-8")
+        return {"id": call_id, "transcript": transcript_text}
+    except Exception as e:
+        logger.error(f"Failed to read transcript file from {run.transcript_path}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve transcript file")

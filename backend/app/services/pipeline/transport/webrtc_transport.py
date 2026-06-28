@@ -89,6 +89,11 @@ class WebRTCTransport:
                     "final": data.get("is_final", False),
                 })
 
+            elif frame.type == FrameType.USER_SPEAKING:
+                await self.ws.send_json({
+                    "type": "interrupted"
+                })
+
             elif frame.type == FrameType.CALL_END:
                 await self.ws.send_json({"type": "end"})
                 break

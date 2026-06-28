@@ -7,12 +7,10 @@ import { toast } from "sonner";
 import {
   PhoneCall,
   Loader2,
-  Calendar,
   Clock,
   Phone,
   FileText,
-  X,
-  BadgeAlert
+  X
 } from "lucide-react";
 
 interface CallRun {
@@ -37,6 +35,7 @@ export default function CallLogsPage() {
   const [selectedCall, setSelectedCall] = useState<CallRun | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [mockTranscript, setMockTranscript] = useState<{ sender: string, text: string }[]>([]);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -64,18 +63,41 @@ export default function CallLogsPage() {
     fetchCalls();
   }, [token]);
 
-  const viewCallDetails = (call: CallRun) => {
+  const viewCallDetails = async (call: CallRun) => {
     setSelectedCall(call);
     setDetailModalOpen(true);
+    setTranscriptLoading(true);
+    setMockTranscript([]);
     
-    // Populate fake transcript for testing call detailed view
-    setMockTranscript([
-      { sender: "agent", text: "Hello, welcome to Auris Support! How may I assist you?" },
-      { sender: "user", text: "Hi, I was checking if you have multi-language support?" },
-      { sender: "agent", text: "Yes! We support English, Hindi, Telugu, Tamil, and several other regional Indian languages." },
-      { sender: "user", text: "Great. Thanks for the quick response." },
-      { sender: "agent", text: "You are welcome. Have a wonderful day!" }
-    ]);
+    try {
+      const res = await fetch(`${API_URL}/calls/${call.id}/transcript`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.transcript || "";
+        const lines = text.split("\n");
+        const parsed = lines
+          .map((line: string) => {
+            if (line.startsWith("User: ")) {
+              return { sender: "user", text: line.substring(6) };
+            } else if (line.startsWith("Agent: ")) {
+              return { sender: "agent", text: line.substring(7) };
+            }
+            return null;
+          })
+          .filter((item: any) => item !== null);
+          
+        setMockTranscript(parsed);
+      } else {
+        toast.error("Failed to load transcript");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error loading transcript");
+    } finally {
+      setTranscriptLoading(false);
+    }
   };
 
   return (
@@ -228,27 +250,38 @@ export default function CallLogsPage() {
               <div className="space-y-3">
                 <h3 className="font-bold text-sm">Transcript Logs</h3>
                 <div className="space-y-4 max-h-[250px] overflow-y-auto pr-2">
-                  {mockTranscript.map((t, idx) => (
-                    <div
-                      key={idx}
-                      className={`flex flex-col space-y-1 max-w-[85%] ${
-                        t.sender === "user" ? "ml-auto items-end" : "mr-auto items-start"
-                      }`}
-                    >
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
-                        {t.sender === "user" ? "You" : "Agent"}
-                      </span>
+                  {transcriptLoading ? (
+                    <div className="py-8 flex items-center justify-center gap-2 text-slate-400 text-xs">
+                      <Loader2 className="w-4 h-4 animate-spin text-teal-500" />
+                      <span>Retrieving transcript from storage...</span>
+                    </div>
+                  ) : mockTranscript.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-xs">
+                      No dialog entries recorded for this call.
+                    </div>
+                  ) : (
+                    mockTranscript.map((t, idx) => (
                       <div
-                        className={`p-3 rounded-2xl text-xs ${
-                          t.sender === "user"
-                            ? "bg-teal-500 text-white rounded-tr-none"
-                            : "bg-slate-100 dark:bg-zinc-800/80 text-slate-800 dark:text-slate-100 rounded-tl-none"
+                        key={idx}
+                        className={`flex flex-col space-y-1 max-w-[85%] ${
+                          t.sender === "user" ? "ml-auto items-end" : "mr-auto items-start"
                         }`}
                       >
-                        {t.text}
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                          {t.sender === "user" ? "You" : "Agent"}
+                        </span>
+                        <div
+                          className={`p-3 rounded-2xl text-xs ${
+                            t.sender === "user"
+                              ? "bg-teal-500 text-white rounded-tr-none"
+                              : "bg-slate-100 dark:bg-zinc-800/80 text-slate-800 dark:text-slate-100 rounded-tl-none"
+                          }`}
+                        >
+                          {t.text}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </div>
