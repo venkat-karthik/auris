@@ -3,6 +3,11 @@ Auris - Core Configuration
 All environment variables. Single source of truth.
 """
 import os
+from dotenv import load_dotenv
+
+# Load local .env file if present
+load_dotenv()
+
 
 # ── App ───────────────────────────────────────────────────────────────────────
 APP_NAME = "Auris"
