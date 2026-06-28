@@ -56,6 +56,9 @@ export default function AgentDetailPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  const processorNodeRef = useRef<any>(null);
+  const activeSourcesRef = useRef<any[]>([]);
+  const nextPlaybackTimeRef = useRef<number>(0);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -138,38 +141,57 @@ export default function AgentDetailPage() {
   };
 
   // --- WebRTC / WebSocket Voice Testing logic ---
+  // --- WebRTC / WebSocket Voice Testing logic ---
   const startVoiceTest = async () => {
     setIsCalling(true);
     setTestTranscript([{ sender: "agent", text: "Connecting to agent..." }]);
+    nextPlaybackTimeRef.current = 0;
+    activeSourcesRef.current = [];
 
-    // Simulated response queue if websocket fails
-    const mockResponses = [
-      "Hello! I am your customized Auris voice assistant. How can I help your business today?",
-      "Yes, I can communicate in Hindi, Telugu, and English fluidly. Our voice latency is under 500 milliseconds.",
-      "Auris is designed for businesses, so I can remember repeat callers and logs transactions instantly. Let me know if you want to deploy me!"
-    ];
-    let mockIdx = 0;
-
-    // We configure a beautiful simulated pipeline flow if the local websocket is not running, 
-    // ensuring the user's interface remains functional, immersive and stunning.
-    setTimeout(() => {
-      setTestTranscript(prev => [...prev, { sender: "agent", text: mockResponses[0] }]);
-    }, 1500);
-
-    const speakMock = () => {
-      if (mockIdx < mockResponses.length - 1) {
-        mockIdx++;
-        setTimeout(() => {
-          setTestTranscript(prev => [...prev, { sender: "agent", text: mockResponses[mockIdx] }]);
-        }, 1500);
+    // Helper: Downsamples buffer from input rate to 16000Hz
+    const downsample = (buffer: Float32Array, inputSampleRate: number) => {
+      const outputSampleRate = 16000;
+      if (inputSampleRate === outputSampleRate) return buffer;
+      const sampleRateRatio = inputSampleRate / outputSampleRate;
+      const newLength = Math.round(buffer.length / sampleRateRatio);
+      const result = new Float32Array(newLength);
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+        let accum = 0;
+        let count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+          accum += buffer[i];
+          count++;
+        }
+        result[offsetResult] = count > 0 ? accum / count : 0;
+        offsetResult++;
+        offsetBuffer = nextOffsetBuffer;
       }
+      return result;
     };
 
-    // Actual WebSocket WebRTC trigger
+    // Helper: Convert Float32Array to 16-bit PCM ArrayBuffer
+    const floatTo16BitPCM = (input: Float32Array) => {
+      const buffer = new ArrayBuffer(input.length * 2);
+      const view = new DataView(buffer);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      return buffer;
+    };
+
     try {
       const wsUrl = `${API_URL.replace("http", "ws")}/calls/ws/${agentId}?token=${token}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
+
+      // Set up Audio Context & Capture Microphone
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioCtxRef.current = audioCtx;
+      nextPlaybackTimeRef.current = audioCtx.currentTime;
 
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: "start", context: { customer_name: "Developer" } }));
@@ -177,26 +199,100 @@ export default function AgentDetailPage() {
 
       ws.onmessage = async (event) => {
         const msg = JSON.parse(event.data);
+        
         if (msg.type === "transcript") {
-          setTestTranscript(prev => [...prev, { sender: "agent", text: msg.text }]);
+          setTestTranscript(prev => {
+            // Avoid duplicates of agent greetings
+            if (prev.length > 0 && prev[prev.length - 1].sender === "agent" && prev[prev.length - 1].text === "Connecting to agent...") {
+              return [{ sender: "agent", text: msg.text }];
+            }
+            // Append
+            return [...prev, { sender: msg.final ? "user" : "agent", text: msg.text }];
+          });
+        }
+        else if (msg.type === "audio") {
+          // Play returned TTS base64 audio
+          const base64Data = msg.data;
+          const binaryString = window.atob(base64Data);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          
+          // Convert 16-bit PCM bytes to Float32 samples
+          const int16Samples = new Int16Array(bytes.buffer);
+          const floatSamples = new Float32Array(int16Samples.length);
+          for (let i = 0; i < int16Samples.length; i++) {
+            floatSamples[i] = int16Samples[i] / 32768.0;
+          }
+
+          // Schedule audio chunk playback
+          const audioBuf = audioCtx.createBuffer(1, floatSamples.length, 16000);
+          audioBuf.copyToChannel(floatSamples, 0);
+
+          const source = audioCtx.createBufferSource();
+          source.buffer = audioBuf;
+          source.connect(audioCtx.destination);
+          
+          const startTime = Math.max(nextPlaybackTimeRef.current, audioCtx.currentTime);
+          source.start(startTime);
+          nextPlaybackTimeRef.current = startTime + audioBuf.duration;
+
+          activeSourcesRef.current.push(source);
+          source.onended = () => {
+            activeSourcesRef.current = activeSourcesRef.current.filter(s => s !== source);
+          };
+        }
+        else if (msg.type === "interrupted") {
+          // User barge-in! Stop all current playing audio
+          activeSourcesRef.current.forEach(src => {
+            try {
+              src.stop();
+            } catch (e) {}
+          });
+          activeSourcesRef.current = [];
+          nextPlaybackTimeRef.current = audioCtx.currentTime;
+          setTestTranscript(prev => [...prev, { sender: "agent", text: "[Agent Interrupted]" }]);
+        }
+        else if (msg.type === "error") {
+          toast.error(msg.message);
+          stopVoiceTest();
         }
       };
 
-      // Set up Audio Context & Capture Microphone
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioCtxRef.current = audioCtx;
-      
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
 
-      // In real setup, we would resample and stream bytes.
-      // Since it's local test interface, we support user voice simulator.
-    } catch (e) {
-      console.log("WebSocket connection failed, running in simulation mode:", e);
-    }
+      const sourceNode = audioCtx.createMediaStreamSource(stream);
+      // ScriptProcessorNode for basic audio buffer capture
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorNodeRef.current = processor;
 
-    // Capture simulation prompt inputs
-    (window as any).simulateSpeak = speakMock;
+      processor.onaudioprocess = (e) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        const downsampled = downsample(inputData, audioCtx.sampleRate);
+        const pcmBuffer = floatTo16BitPCM(downsampled);
+        
+        // Convert arraybuffer to base64
+        const binaryBytes = new Uint8Array(pcmBuffer);
+        let binaryString = "";
+        for (let i = 0; i < binaryBytes.length; i++) {
+          binaryString += String.fromCharCode(binaryBytes[i]);
+        }
+        const base64String = window.btoa(binaryString);
+        ws.send(JSON.stringify({ type: "audio", data: base64String }));
+      };
+
+      sourceNode.connect(processor);
+      processor.connect(audioCtx.destination);
+
+    } catch (err) {
+      console.log("WebSocket voice testing error:", err);
+      toast.error("Could not initialize microphone or web socket stream.");
+      stopVoiceTest();
+    }
   };
 
   const stopVoiceTest = () => {
@@ -205,10 +301,20 @@ export default function AgentDetailPage() {
       wsRef.current.close();
       wsRef.current = null;
     }
+    if (processorNodeRef.current) {
+      processorNodeRef.current.disconnect();
+      processorNodeRef.current = null;
+    }
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(track => track.stop());
       micStreamRef.current = null;
     }
+    activeSourcesRef.current.forEach(src => {
+      try {
+        src.stop();
+      } catch (e) {}
+    });
+    activeSourcesRef.current = [];
     if (audioCtxRef.current) {
       audioCtxRef.current.close();
       audioCtxRef.current = null;

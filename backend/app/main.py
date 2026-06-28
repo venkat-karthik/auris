@@ -4,7 +4,7 @@ Auris - Main FastAPI Application
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -17,6 +17,7 @@ from app.routes.telephony import router as telephony_router
 from app.routes.knowledge_base import router as knowledge_base_router
 from app.routes.campaigns import router as campaigns_router
 from app.routes.api_keys import router as api_keys_router
+from app.dependencies.rate_limit import check_rate_limit
 
 
 @asynccontextmanager
@@ -49,13 +50,13 @@ app.add_middleware(
 API_PREFIX = "/api/v1"
 
 app.include_router(auth_router, prefix=API_PREFIX)
-app.include_router(agents_router, prefix=API_PREFIX)
-app.include_router(calls_router, prefix=API_PREFIX)
+app.include_router(agents_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(calls_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(telephony_router, prefix=API_PREFIX)
-app.include_router(billing_router, prefix=API_PREFIX)
-app.include_router(knowledge_base_router, prefix=API_PREFIX)
-app.include_router(campaigns_router, prefix=API_PREFIX)
-app.include_router(api_keys_router, prefix=API_PREFIX)
+app.include_router(billing_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(knowledge_base_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(campaigns_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(api_keys_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 
 
 @app.get("/api/v1/health")
