@@ -20,6 +20,8 @@ from app.routes.knowledge_base import router as knowledge_base_router
 from app.routes.campaigns import router as campaigns_router
 from app.routes.api_keys import router as api_keys_router
 from app.routes.phone_numbers import router as phone_numbers_router
+from app.routes.analytics import router as analytics_router
+from app.routes.monitor import router as monitor_router
 from app.dependencies.rate_limit import check_rate_limit
 
 
@@ -61,6 +63,9 @@ app.include_router(knowledge_base_router, prefix=API_PREFIX, dependencies=[Depen
 app.include_router(campaigns_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(api_keys_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(phone_numbers_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(analytics_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(monitor_router, prefix=API_PREFIX)
+
 
 
 @app.get("/api/v1/health")

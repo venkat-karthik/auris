@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/Providers";
 import DashboardLayout from "@/components/DashboardLayout";
+import LiveMonitor from "@/components/LiveMonitor";
 import { toast } from "sonner";
 import {
   TrendingUp,
@@ -11,7 +12,10 @@ import {
   Bot,
   PhoneCall,
   Loader2,
-  Calendar
+  Calendar,
+  BarChart2,
+  PieChart as PieIcon,
+  PhoneOff
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -20,7 +24,13 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid
+  CartesianGrid,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  Legend
 } from "recharts";
 
 interface CallRun {
@@ -28,13 +38,33 @@ interface CallRun {
   duration_seconds: number | null;
   status: string;
   created_at: string;
+  voicemail: boolean | null;
 }
 
+interface AgentAnalytic {
+  agent_id: number;
+  name: string;
+  call_count: number;
+  avg_duration: number;
+  conversion_rate: number;
+  voicemail_count: number;
+  total_cost: number;
+}
+
+interface CallOutcome {
+  outcome: string;
+  count: number;
+}
+
+const COLORS = ["#0ea5e9", "#f43f5e", "#eab308", "#6b7280", "#a855f7", "#10b981"];
+
 export default function DashboardPage() {
-  const { token, orgId } = useAuth();
+  const { token } = useAuth();
   const [balance, setBalance] = useState<number>(0);
   const [agentsCount, setAgentsCount] = useState<number>(0);
   const [calls, setCalls] = useState<CallRun[]>([]);
+  const [agentAnalytics, setAgentAnalytics] = useState<AgentAnalytic[]>([]);
+  const [callOutcomes, setCallOutcomes] = useState<CallOutcome[]>([]);
   const [loading, setLoading] = useState(true);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -47,7 +77,7 @@ export default function DashboardPage() {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (balanceRes.ok) {
-        const balanceData = await balanceRes.ok ? await balanceRes.json() : { balance_credits: 0 };
+        const balanceData = await balanceRes.json();
         setBalance(balanceData.balance_credits || 0);
       }
 
@@ -68,6 +98,24 @@ export default function DashboardPage() {
         const callsData = await callsRes.json();
         setCalls(callsData || []);
       }
+
+      // 4. Fetch agent analytics
+      const agentRes = await fetch(`${API_URL}/analytics/agents`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (agentRes.ok) {
+        const agentData = await agentRes.json();
+        setAgentAnalytics(agentData || []);
+      }
+
+      // 5. Fetch call outcomes
+      const outcomeRes = await fetch(`${API_URL}/analytics/call_outcomes`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (outcomeRes.ok) {
+        const outcomeData = await outcomeRes.json();
+        setCallOutcomes(outcomeData || []);
+      }
     } catch (err) {
       console.error(err);
       toast.error("Could not fetch latest metrics");
@@ -83,7 +131,7 @@ export default function DashboardPage() {
   // Compute stats
   const totalCallSeconds = calls.reduce((acc, call) => acc + (call.duration_seconds || 0), 0);
   const totalMinutes = Math.round(totalCallSeconds / 60);
-  const completedCalls = calls.filter(c => c.status === "completed").length;
+  const voicemailsCount = calls.filter(c => c.voicemail).length;
 
   // Process data for Recharts (calls per day)
   const getChartData = () => {
@@ -128,7 +176,7 @@ export default function DashboardPage() {
         <div className="flex flex-col space-y-2">
           <h1 className="text-3xl font-extrabold tracking-tight">Overview</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Realtime activity, credit balances, and operational insights.
+            Realtime activity, agent performance metrics, and call outcome distribution.
           </p>
         </div>
 
@@ -187,7 +235,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Analytics Section */}
+        {/* First Row of Charts: Call Volume & Outcome */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Call Volume Chart */}
           <div className="lg:col-span-2 glass p-6 rounded-2xl shadow-sm flex flex-col space-y-6">
@@ -228,36 +276,159 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Quick Logs Panel */}
-          <div className="glass p-6 rounded-2xl shadow-sm flex flex-col space-y-4">
-            <h3 className="font-bold text-lg">Recent Calls</h3>
-            <div className="flex-1 overflow-y-auto space-y-3 max-h-[260px] pr-2">
-              {calls.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-sm text-slate-400">
-                  No call logs recorded yet.
-                </div>
-              ) : (
-                calls.slice(0, 5).map(call => (
-                  <div
-                    key={call.id}
-                    className="p-3 rounded-xl bg-white/40 dark:bg-zinc-900/40 border border-slate-100 dark:border-zinc-800/50 flex items-center justify-between text-sm"
-                  >
-                    <div className="space-y-1">
-                      <p className="font-bold flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${call.status === "completed" ? "bg-emerald-500" : "bg-amber-500"}`} />
-                        Call #{call.id}
-                      </p>
-                      <p className="text-xs text-slate-400 dark:text-slate-500">
-                        {new Date(call.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                    <span className="text-xs px-2 py-1 rounded-lg bg-slate-100 dark:bg-zinc-800/80 font-mono text-slate-500 dark:text-slate-400">
-                      {call.duration_seconds ? `${Math.round(call.duration_seconds)}s` : "--"}
-                    </span>
-                  </div>
-                ))
-              )}
+          {/* Call Outcome Distribution */}
+          <div className="glass p-6 rounded-2xl shadow-sm flex flex-col space-y-6">
+            <div className="flex items-center space-x-2">
+              <PieIcon className="w-5 h-5 text-indigo-500" />
+              <h3 className="font-bold text-lg">Call Outcomes</h3>
             </div>
+
+            <div className="h-48 w-full flex items-center justify-center relative">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={callOutcomes}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={4}
+                    dataKey="count"
+                    nameKey="outcome"
+                  >
+                    {callOutcomes.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "rgba(9, 9, 11, 0.9)",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      borderRadius: "12px",
+                      color: "#fff",
+                      fontSize: "12px"
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute text-center">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total</span>
+                <span className="text-2xl font-black">{callOutcomes.reduce((acc, curr) => acc + curr.count, 0)}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              {callOutcomes.map((entry, index) => (
+                <div key={entry.outcome} className="flex items-center space-x-1.5">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                  />
+                  <span className="text-slate-400 font-medium truncate">{entry.outcome} ({entry.count})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Second Row of Charts: Agent Analytics & Recent Logs */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Agent Performance Chart */}
+          <div className="lg:col-span-2 glass p-6 rounded-2xl shadow-sm flex flex-col space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <BarChart2 className="w-5 h-5 text-indigo-500" />
+                <h3 className="font-bold text-lg">Agent Performance & Conversions</h3>
+              </div>
+            </div>
+
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={agentAnalytics} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} opacity={0.15} />
+                  <XAxis dataKey="name" stroke="#71717a" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#71717a" fontSize={11} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "rgba(9, 9, 11, 0.9)",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      borderRadius: "12px",
+                      color: "#fff",
+                      fontSize: "12px"
+                    }}
+                  />
+                  <Legend verticalAlign="top" height={36} iconType="circle" />
+                  <Bar name="Calls Handled" dataKey="call_count" fill="#0ea5e9" radius={[4, 4, 0, 0]} barSize={30} />
+                  <Bar name="Conversion Rate (%)" dataKey="conversion_rate" fill="#10b981" radius={[4, 4, 0, 0]} barSize={30} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="glass p-6 rounded-2xl shadow-sm flex flex-col space-y-4">
+            <LiveMonitor />
+          </div>
+        </div>
+
+        {/* Row 4: Voicemails and Recent Calls Log */}
+        <div className="glass p-6 rounded-2xl shadow-sm flex flex-col space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-lg">Recent Call Activity Logs</h3>
+            {voicemailsCount > 0 && (
+              <span className="flex items-center gap-1 text-xs text-red-500 font-bold bg-red-500/10 px-2.5 py-0.5 rounded-full">
+                <PhoneOff className="w-3 h-3" /> {voicemailsCount} Voicemails Detected
+              </span>
+            )}
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="bg-slate-100/55 dark:bg-zinc-900/50 text-slate-400 dark:text-slate-500 border-b border-slate-200/60 dark:border-zinc-800/60 font-bold uppercase tracking-wider text-[11px]">
+                  <th className="py-3 px-4">Call ID</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Voicemail</th>
+                  <th className="py-3 px-4">Duration</th>
+                  <th className="py-3 px-4">Time</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/40">
+                {calls.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-sm text-slate-400">
+                      No call logs recorded yet.
+                    </td>
+                  </tr>
+                ) : (
+                  calls.slice(0, 8).map(call => (
+                    <tr key={call.id} className="hover:bg-slate-100/30 dark:hover:bg-zinc-900/20 transition-colors">
+                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
+                        #{call.id}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${call.status === "completed" ? "text-emerald-500" : "text-amber-500"}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${call.status === "completed" ? "bg-emerald-500" : "bg-amber-500"}`} />
+                          {call.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        {call.voicemail ? (
+                          <span className="text-[10px] px-2 py-0.5 bg-rose-500/10 text-rose-500 rounded border border-rose-500/20 font-bold">Voicemail</span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.5 bg-slate-100 dark:bg-zinc-800 text-slate-400 rounded font-medium">None</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-500 dark:text-slate-400">
+                        {call.duration_seconds ? `${Math.round(call.duration_seconds)}s` : "--"}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-400 dark:text-slate-500">
+                        {new Date(call.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

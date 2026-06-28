@@ -39,6 +39,7 @@ class CallRunResponse(BaseModel):
     called_number: str | None
     duration_seconds: float | None
     disposition: str | None
+    voicemail: bool | None
     created_at: str
 
     class Config:
@@ -65,10 +66,16 @@ async def list_calls(
     runs = result.scalars().all()
     return [
         CallRunResponse(
-            id=r.id, agent_id=r.agent_id, transport=r.transport,
-            call_type=r.call_type, status=r.status,
-            caller_number=r.caller_number, called_number=r.called_number,
-            duration_seconds=r.duration_seconds, disposition=r.disposition,
+            id=r.id,
+            agent_id=r.agent_id,
+            transport=r.transport,
+            call_type=r.call_type,
+            status=r.status,
+            caller_number=r.caller_number,
+            called_number=r.called_number,
+            duration_seconds=r.duration_seconds,
+            disposition=r.disposition,
+            voicemail=(r.voicemail == "true") if r.voicemail is not None else None,
             created_at=r.created_at.isoformat(),
         )
         for r in runs
@@ -88,10 +95,16 @@ async def get_call(
     if not run:
         raise HTTPException(status_code=404, detail="Call not found")
     return CallRunResponse(
-        id=run.id, agent_id=run.agent_id, transport=run.transport,
-        call_type=run.call_type, status=run.status,
-        caller_number=run.caller_number, called_number=run.called_number,
-        duration_seconds=run.duration_seconds, disposition=run.disposition,
+        id=run.id,
+        agent_id=run.agent_id,
+        transport=run.transport,
+        call_type=run.call_type,
+        status=run.status,
+        caller_number=run.caller_number,
+        called_number=run.called_number,
+        duration_seconds=run.duration_seconds,
+        disposition=run.disposition,
+        voicemail=(run.voicemail == "true") if run.voicemail is not None else None,
         created_at=run.created_at.isoformat(),
     )
 
@@ -171,6 +184,17 @@ async def websocket_call(
         await db.commit()
         await db.refresh(run)
         run_id = run.id
+
+        from app.services.monitor_tracker import MonitorTracker
+        MonitorTracker.register_call(
+            run_id=run_id,
+            agent_id=agent.id,
+            agent_name=agent.name,
+            transport="webrtc",
+            call_type="inbound",
+            caller_number=caller_number,
+            called_number=called_number
+        )
 
     logger.info(f"WebRTC call started: agent={agent_id} run={run_id}")
 
@@ -275,11 +299,15 @@ async def websocket_call(
                     text = data.get("text", "").strip()
                     if text:
                         transcript_segments.append(f"User: {text}")
+                        from app.services.monitor_tracker import MonitorTracker
+                        MonitorTracker.update_transcript(run_id, text, "user")
             elif frame.type == FrameType.LLM_TEXT_COMPLETE:
                 data = frame.data or {}
                 text = data.get("text", "").strip()
                 if text:
                     transcript_segments.append(f"Agent: {text}")
+                    from app.services.monitor_tracker import MonitorTracker
+                    MonitorTracker.update_transcript(run_id, text, "agent")
             elif frame.type == FrameType.TOOL_CALL:
                 # Intercept tool calls, execute them, and push back TOOL_RESULT
                 data = frame.data or {}
@@ -340,6 +368,8 @@ async def websocket_call(
         logger.error(f"WebRTC call error: run={run_id} error={e}")
     finally:
         await pipeline.stop()
+        from app.services.monitor_tracker import MonitorTracker
+        MonitorTracker.end_call(run_id)
         end_time = datetime.now(UTC)
         duration = (end_time - start_time).total_seconds()
 
@@ -480,3 +510,31 @@ async def get_recording(
     if not call or not call.recording_path:
         raise HTTPException(status_code=404, detail="Recording not found")
     return FileResponse(call.recording_path, media_type="audio/mpeg")
+
+
+class DTMFRequest(BaseModel):
+    digit: str
+
+
+@router.post("/{call_id}/dtmf")
+async def send_dtmf(
+    call_id: int,
+    req: DTMFRequest,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id))
+    call = result.scalar_one_or_none()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    
+    logger.info(f"Received DTMF digit '{req.digit}' for call run {call_id}")
+    
+    # Store digit sequence in gathered_context
+    ctx = dict(call.gathered_context or {})
+    ctx["dtmf_digits"] = ctx.get("dtmf_digits", "") + req.digit
+    call.gathered_context = ctx
+    await db.commit()
+    
+    return {"success": True, "digits": ctx["dtmf_digits"]}
+

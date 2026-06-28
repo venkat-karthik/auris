@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Dialog, DialogTitle, DialogContent, DialogFooter, DialogHeader, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { PhoneOff } from "lucide-react";
 import { useAuth } from "@/components/Providers";
 import Link from "next/link";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -35,6 +39,9 @@ export default function CallLogsPage() {
   // Selected call states for modal detail
   const [selectedCall, setSelectedCall] = useState<CallRun | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [agents, setAgents] = useState<Array<{id: number, name: string}>>([]);
+  const [targetAgentId, setTargetAgentId] = useState<number | null>(null);
   const [mockTranscript, setMockTranscript] = useState<{ sender: string, text: string }[]>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
 
@@ -60,9 +67,7 @@ export default function CallLogsPage() {
     }
   };
 
-  useEffect(() => {
-    fetchCalls();
-  }, [token]);
+  useEffect(() => { fetchCalls(); fetchAgents(); }, [token]);
 
   const viewCallDetails = async (call: CallRun) => {
     setSelectedCall(call);
@@ -101,10 +106,51 @@ export default function CallLogsPage() {
     }
   };
 
+  const fetchAgents = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/agents`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setAgents(data);
+      } else {
+        toast.error("Failed to load agents");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error loading agents");
+    }
+  };
+
+  const openTransferModal = (call: CallRun) => {
+    setSelectedCall(call);
+    setTransferModalOpen(true);
+  };
+
+  const handleTransfer = async () => {
+    if (!selectedCall || targetAgentId === null) return;
+    try {
+      const res = await fetch(`${API_URL}/calls/${selectedCall.id}/warm_transfer`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ target_agent_id: targetAgentId })
+      });
+      if (res.ok) {
+        toast.success("Warm transfer initiated");
+        setTransferModalOpen(false);
+        await fetchCalls();
+      } else {
+        toast.error("Warm transfer failed");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error during warm transfer");
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-8">
-        {/* Header */}
         <div className="space-y-2">
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
             <PhoneCall className="text-teal-500 w-8 h-8" /> Call Logs
@@ -115,7 +161,6 @@ export default function CallLogsPage() {
           </p>
         </div>
 
-        {/* Loading and Tables */}
         {loading ? (
           <div className="h-64 w-full flex items-center justify-center">
             <Loader2 className="w-10 h-10 text-teal-500 animate-spin" />
@@ -170,6 +215,7 @@ export default function CallLogsPage() {
                               : "text-amber-500"
                           }`}
                         >
+                          {call.voicemail && <PhoneOff className="w-4 h-4 text-red-500 mr-1" />}
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
                               call.status === "completed" ? "bg-emerald-500" : "bg-amber-500"
@@ -195,6 +241,12 @@ export default function CallLogsPage() {
                           className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-600 dark:text-teal-400 hover:underline cursor-pointer"
                         >
                           <FileText className="w-3.5 h-3.5" /> Details
+                        </button>
+                        <button
+                          onClick={() => openTransferModal(call)}
+                          className="ml-2 inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                        >
+                          Transfer
                         </button>
                       </td>
                     </tr>
@@ -291,5 +343,28 @@ export default function CallLogsPage() {
         )}
       </div>
     </DashboardLayout>
+  {/* Transfer Modal */}
+  {transferModalOpen && selectedCall && (
+    <Dialog open={transferModalOpen} onOpenChange={setTransferModalOpen}>
+      <DialogHeader>
+        <DialogTitle>Warm Transfer Call #{selectedCall.id}</DialogTitle>
+      </DialogHeader>
+      <DialogContent className="space-y-4">
+        <Select value={targetAgentId?.toString() ?? ""} onValueChange={(v) => setTargetAgentId(parseInt(v))}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select target agent" />
+          </SelectTrigger>
+          <SelectContent>
+            {agents.map((a) => (
+              <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </DialogContent>
+      <DialogFooter>
+        <Button onClick={handleTransfer} disabled={targetAgentId === null}>Transfer</Button>
+      </DialogFooter>
+    </Dialog>
+  )}
   );
 }

@@ -23,6 +23,7 @@ async def telnyx_ws(
     agent_id: int = Query(..., description="Agent ID"),
     from_number: str | None = Query(None, alias="from", description="Caller phone number"),
     to_number: str | None = Query(None, alias="to", description="Called phone number"),
+    call_type: str = Query("inbound", description="Call type (inbound or outbound)"),
     db: AsyncSession = Depends(get_db),
 ):
     await websocket.accept()
@@ -54,7 +55,7 @@ async def telnyx_ws(
         org_id=org_id,
         agent_id=agent.id,
         transport="telnyx",
-        call_type="inbound",
+        call_type=call_type,
         status="running",
         caller_number=from_number,
         called_number=to_number,
@@ -64,6 +65,17 @@ async def telnyx_ws(
     await db.commit()
     await db.refresh(run)
     run_id = run.id
+
+    from app.services.monitor_tracker import MonitorTracker
+    MonitorTracker.register_call(
+        run_id=run_id,
+        agent_id=agent.id,
+        agent_name=agent.name,
+        transport="telnyx",
+        call_type=call_type,
+        caller_number=from_number,
+        called_number=to_number
+    )
 
     has_visual_nodes = len(agent.graph.get("nodes", [])) > 0
     workflow_state = None
@@ -161,11 +173,15 @@ async def telnyx_ws(
                     text = data.get("text", "").strip()
                     if text:
                         transcript_segments.append(f"User: {text}")
+                        from app.services.monitor_tracker import MonitorTracker
+                        MonitorTracker.update_transcript(run_id, text, "user")
             elif frame.type == FrameType.LLM_TEXT_COMPLETE:
                 data = frame.data or {}
                 text = data.get("text", "").strip()
                 if text:
                     transcript_segments.append(f"Agent: {text}")
+                    from app.services.monitor_tracker import MonitorTracker
+                    MonitorTracker.update_transcript(run_id, text, "agent")
             elif frame.type == FrameType.TOOL_CALL:
                 # Intercept tool calls, execute them, and push back TOOL_RESULT
                 data = frame.data or {}
@@ -214,10 +230,36 @@ async def telnyx_ws(
 
     start_time = datetime.now(UTC)
 
+    voicemail_audio_accumulator = []
+    voicemail_detection_done = False
+
     async def receive_loop():
+        nonlocal voicemail_detection_done
         try:
             async for pcm_chunk in TelnyxTransport.receive_ulaw(websocket):
                 await pipeline.push(audio_in(pcm_chunk))
+                if call_type == "outbound" and not voicemail_detection_done:
+                    voicemail_audio_accumulator.append(pcm_chunk)
+                    total_bytes = sum(len(c) for c in voicemail_audio_accumulator)
+                    # 5 seconds of 16kHz 16-bit PCM is 160000 bytes
+                    if total_bytes >= 160000:
+                        voicemail_detection_done = True
+                        audio_data = b"".join(voicemail_audio_accumulator)
+                        async def run_detection(data: bytes, r_id: int):
+                            try:
+                                from app.services.voicemail_detection import VoicemailDetector
+                                res = await VoicemailDetector.detect(data)
+                                is_vm = res.get("is_voicemail", False)
+                                logger.info(f"Voicemail detection for run {r_id}: {is_vm}")
+                                async with AsyncSessionLocal() as session:
+                                    db_res = await session.execute(select(CallRun).where(CallRun.id == r_id))
+                                    run_record = db_res.scalar_one_or_none()
+                                    if run_record:
+                                        run_record.voicemail = "true" if is_vm else "false"
+                                        await session.commit()
+                            except Exception as ex:
+                                logger.error(f"Error during voicemail detection: {ex}")
+                        asyncio.create_task(run_detection(audio_data, run_id))
         except Exception as e:
             logger.info(f"Telnyx receive loop ended/disconnected: {e}")
 
@@ -239,8 +281,27 @@ async def telnyx_ws(
         await asyncio.gather(receive_loop(), send_loop())
     finally:
         await pipeline.stop()
+        from app.services.monitor_tracker import MonitorTracker
+        MonitorTracker.end_call(run_id)
         end_time = datetime.now(UTC)
         duration = (end_time - start_time).total_seconds()
+
+        # Check if voicemail detection wasn't triggered yet because call was too short
+        if call_type == "outbound" and not voicemail_detection_done and voicemail_audio_accumulator:
+            audio_data = b"".join(voicemail_audio_accumulator)
+            try:
+                from app.services.voicemail_detection import VoicemailDetector
+                res = await VoicemailDetector.detect(audio_data)
+                is_vm = res.get("is_voicemail", False)
+                logger.info(f"Voicemail detection (fallback short-call) for run {run_id}: {is_vm}")
+                async with AsyncSessionLocal() as db_session:
+                    db_res = await db_session.execute(select(CallRun).where(CallRun.id == run_id))
+                    run_record = db_res.scalar_one_or_none()
+                    if run_record:
+                        run_record.voicemail = "true" if is_vm else "false"
+                        await db_session.commit()
+            except Exception as ex:
+                logger.error(f"Error during final voicemail detection: {ex}")
 
         # Update call run
         async with AsyncSessionLocal() as db_session:
@@ -289,10 +350,11 @@ async def inbound_telnyx(
     agent_id: int = Query(...),
     from_number: str | None = Query(None, alias="from"),
     to_number: str | None = Query(None, alias="to"),
+    call_type: str = Query("inbound"),
 ):
     from app.core.config import BACKEND_URL
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
-    ws_url = f"{ws_base}/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}&org_id={org_id}&agent_id={agent_id}"
+    ws_url = f"{ws_base}/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}&org_id={org_id}&agent_id={agent_id}&call_type={call_type}"
     if from_number:
         ws_url += f"&from={from_number}"
     if to_number:

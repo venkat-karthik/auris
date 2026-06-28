@@ -75,7 +75,7 @@ async def dial_number(db: AsyncSession, contact_id: int) -> bool:
     
     # Build webhook URL that Telnyx invokes when call is answered.
     # Our inbound telephony webhook receives the answered payload and connects a WebSocket.
-    webhook_url = f"{BACKEND_URL}/api/v1/telephony/inbound/telnyx?org_id={campaign.org_id}&agent_id={campaign.agent_id}"
+    webhook_url = f"{BACKEND_URL}/api/v1/telephony/inbound/telnyx?org_id={campaign.org_id}&agent_id={campaign.agent_id}&call_type=outbound"
     
     payload = {
         "to": contact.phone_number,

@@ -49,6 +49,7 @@ CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY", "")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_CALLER_ID = os.getenv("TWILIO_CALLER_ID", "")
 
 # ── Payments ──────────────────────────────────────────────────────────────────
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
