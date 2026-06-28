@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/purity, @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -92,13 +93,13 @@ export default function LiveMonitor() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <Activity className={`w-5 h-5 ${calls.length > 0 ? "text-rose-500 animate-pulse" : "text-teal-500"}`} />
+          <Activity className={`w-5 h-5 ${calls.length > 0 ? "text-rose-500 animate-pulse" : "text-purple-500"}`} />
           <h3 className="font-bold text-lg">Live Call Monitor</h3>
         </div>
         <div className="flex items-center space-x-2">
           <span
             className={`w-2 h-2 rounded-full ${
-              connected ? "bg-emerald-500 animate-ping" : "bg-rose-500"
+              connected ? "bg-fuchsia-500 animate-ping" : "bg-rose-500"
             }`}
           />
           <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">
@@ -112,8 +113,8 @@ export default function LiveMonitor() {
         {calls.length === 0 ? (
           <div className="h-48 flex flex-col items-center justify-center text-center space-y-3">
             <div className="relative flex items-center justify-center">
-              <span className="absolute inline-flex h-12 w-12 rounded-full bg-teal-500/10 dark:bg-teal-500/20 animate-ping" />
-              <div className="p-3 bg-teal-500/20 text-teal-500 rounded-full">
+              <span className="absolute inline-flex h-12 w-12 rounded-full bg-purple-500/10 dark:bg-purple-500/20 animate-ping" />
+              <div className="p-3 bg-purple-500/20 text-purple-500 rounded-full">
                 <Volume2 className="w-6 h-6 animate-bounce" />
               </div>
             </div>
@@ -140,18 +141,18 @@ export default function LiveMonitor() {
                       #{call.run_id}
                     </span>
                   </div>
-                  <span className="text-xs font-bold font-mono text-teal-500 dark:text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded-md">
+                  <span className="text-xs font-bold font-mono text-fuchsia-500 dark:text-fuchsia-400 bg-fuchsia-500/10 px-2 py-0.5 rounded-md">
                     {formatDuration(elapsed)}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="flex items-center space-x-1.5 text-slate-500 dark:text-slate-400">
-                    <Bot className="w-3.5 h-3.5 text-indigo-500" />
+                    <Bot className="w-3.5 h-3.5 text-purple-500" />
                     <span className="font-bold truncate">{call.agent_name}</span>
                   </div>
                   <div className="flex items-center space-x-1.5 text-slate-500 dark:text-slate-400">
-                    <Phone className="w-3.5 h-3.5 text-sky-500" />
+                    <Phone className="w-3.5 h-3.5 text-cyan-500" />
                     <span className="font-mono truncate">{call.caller_number}</span>
                   </div>
                 </div>

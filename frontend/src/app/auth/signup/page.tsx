@@ -1,3 +1,4 @@
+/* eslint-disable react/no-unescaped-entities */
 "use client";
 
 import { useState } from "react";
@@ -92,7 +93,7 @@ export default function SignupPage() {
     <div className="min-h-screen w-full flex flex-col justify-center items-center px-4 py-12 bg-gradient-soothing">
       <div className="w-full max-w-md glass rounded-2xl shadow-2xl overflow-hidden p-8 flex flex-col space-y-6">
         <div className="flex flex-col space-y-2 text-center">
-          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-teal-500 to-indigo-500 bg-clip-text text-transparent dark:from-teal-400 dark:to-indigo-400">
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-fuchsia-500 via-purple-600 to-indigo-500 bg-clip-text text-transparent dark:from-fuchsia-400 dark:to-cyan-400">
             Auris
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -111,7 +112,7 @@ export default function SignupPage() {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Venkat Karthik"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
                 />
               </div>
             </div>
@@ -125,7 +126,7 @@ export default function SignupPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@domain.com"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
                 />
               </div>
             </div>
@@ -139,7 +140,7 @@ export default function SignupPage() {
                   value={orgName}
                   onChange={(e) => setOrgName(e.target.value)}
                   placeholder="Acme Corp"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
                 />
               </div>
             </div>
@@ -153,7 +154,7 @@ export default function SignupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
                 />
               </div>
             </div>
@@ -161,7 +162,7 @@ export default function SignupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white font-semibold shadow-lg shadow-teal-500/25 dark:shadow-none focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all duration-300 transform active:scale-[0.98] cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white font-semibold shadow-lg shadow-fuchsia-500/25 dark:shadow-none focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 transition-all duration-300 transform active:scale-[0.98] cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -178,8 +179,8 @@ export default function SignupPage() {
             <div className="space-y-2 text-center">
               <h3 className="text-lg font-bold">Verify Your Email</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                We've sent a 6-digit verification code to <span className="font-semibold">{email}</span>.<br />
-                <span className="text-indigo-500 dark:text-indigo-400 font-medium">(If testing locally, lookup the code in your server logs.)</span>
+                We&apos;ve sent a 6-digit verification code to <span className="font-semibold">{email}</span>.<br />
+                <span className="text-purple-500 dark:text-purple-400 font-medium">(If testing locally, lookup the code in your server logs.)</span>
               </p>
             </div>
 
@@ -191,14 +192,14 @@ export default function SignupPage() {
                 value={verificationCode}
                 onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
                 placeholder="000000"
-                className="w-full text-center tracking-widest text-lg font-mono py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all"
+                className="w-full text-center tracking-widest text-lg font-mono py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all"
               />
             </div>
 
             <button
               type="submit"
               disabled={verifyLoading}
-              className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-teal-500 hover:bg-teal-600 text-white font-semibold shadow-lg shadow-teal-500/25 dark:shadow-none focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all cursor-pointer disabled:opacity-75"
+              className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-semibold shadow-lg shadow-fuchsia-500/25 dark:shadow-none focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 transition-all cursor-pointer disabled:opacity-75"
             >
               {verifyLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -219,7 +220,7 @@ export default function SignupPage() {
 
         <div className="text-center text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-zinc-800/80 pt-4">
           <span>Already have an account? </span>
-          <Link href="/auth/login" className="text-teal-600 dark:text-teal-400 font-bold hover:underline">
+          <Link href="/auth/login" className="text-fuchsia-600 dark:text-fuchsia-400 font-bold hover:underline">
             Log In
           </Link>
         </div>

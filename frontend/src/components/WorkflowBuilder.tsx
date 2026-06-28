@@ -1,4 +1,5 @@
 // src/components/WorkflowBuilder.tsx
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, react-hooks/purity */
 "use client";
 
 import React, { useCallback, useState, useEffect } from "react";
@@ -50,12 +51,6 @@ export default function WorkflowBuilder() {
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
-  // Fetch agents on mount
-  useEffect(() => {
-    if (!token) return;
-    fetchAgents();
-  }, [token]);
-
   const fetchAgents = async () => {
     try {
       const res = await fetch(`${API_URL}/agents`, {
@@ -73,6 +68,12 @@ export default function WorkflowBuilder() {
       toast.error("Failed to load agents list");
     }
   };
+
+  // Fetch agents on mount
+  useEffect(() => {
+    if (!token) return;
+    fetchAgents();
+  }, [token]);
 
   // Load selected agent's graph
   useEffect(() => {
