@@ -8,13 +8,18 @@ import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   Bot,
-  Send,
-  Cpu,
-  Phone,
-  Wrench,
+  Mic,
   FileText,
-  Volume2,
-  Code,
+  Boxes,
+  Phone,
+  MessageSquareCode,
+  PhoneCall,
+  BarChart3,
+  Send,
+  Megaphone,
+  CreditCard,
+  Key,
+  Users2,
   LogOut,
   Sun,
   Moon,
@@ -56,15 +61,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     fetchBalance();
   }, [token, pathname]);
 
-  const navBuild = [
-    { name: "Voice Agents", href: "/agents", icon: Bot },
-    { name: "Campaigns", href: "/campaigns", icon: Send },
-    { name: "Models", href: "/models", icon: Cpu },
-    { name: "Telephony", href: "/telephony", icon: Phone },
-    { name: "Tools", href: "/tools", icon: Wrench },
+  const navSetup = [
+    { name: "Voice AI Assistants", href: "/agents", icon: Bot },
+    { name: "Clone Voice", href: "/clone-voice", icon: Mic },
     { name: "Files", href: "/files", icon: FileText },
-    { name: "Recordings", href: "/calls", icon: Volume2 },
-    { name: "Developers", href: "/settings", icon: Code },
+    { name: "Integrations", href: "/integrations", icon: Boxes },
+  ];
+
+  const navMonitoring = [
+    { name: "Phone Numbers", href: "/telephony", icon: Phone },
+    { name: "WhatsApp Numbers", href: "/whatsapp", icon: MessageSquareCode },
+    { name: "Call Logs", href: "/calls", icon: PhoneCall },
+    { name: "Analytics", href: "/analytics", icon: BarChart3 },
+  ];
+
+  const navCampaigns = [
+    { name: "Bulk Call", href: "/campaigns", icon: Send },
+    { name: "Broadcast", href: "/broadcast", icon: Megaphone },
+  ];
+
+  const navBilling = [
+    { name: "Billing", href: "/billing", icon: CreditCard },
+    { name: "API", href: "/settings", icon: Key },
+    { name: "Reseller", href: "/reseller", icon: Users2 },
   ];
 
   return (
@@ -88,13 +107,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="px-6 flex items-center justify-between border-b border-slate-800/80 pb-4">
             <Link href="/dashboard" className="flex items-center space-x-2.5">
               <div className="w-8 h-8 rounded-lg bg-teal-500 flex items-center justify-center text-white font-black text-lg">
-                A
+                O
               </div>
               <span className="text-xl font-bold tracking-tight text-white">
-                Auris
-              </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono font-bold">
-                v1.37.0
+                OmniDimension
               </span>
             </Link>
             <button
@@ -106,58 +122,125 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
 
           {/* Navigation Menu */}
-          <div className="mt-6 px-3 space-y-7">
-            {/* Overview Section */}
-            <div>
-              <Link
-                href="/dashboard"
-                onClick={() => setSidebarOpen(false)}
-                className={`flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 ${
-                  pathname === "/dashboard"
-                    ? "bg-teal-500/10 text-teal-400 font-bold border-l-2 border-teal-500"
-                    : "hover:bg-slate-800 hover:text-white"
-                }`}
-              >
-                <LayoutDashboard className="w-4 h-4" />
-                <span>Overview</span>
-              </Link>
-            </div>
-
-            {/* Build Section */}
+          <div className="mt-6 px-3 space-y-6">
+            
+            {/* Voice AI Setup Section */}
             <div>
               <label className="px-3 text-[10px] font-black tracking-widest text-slate-500 uppercase block mb-2">
-                Build
+                Voice AI Setup
               </label>
-              <div className="space-y-1">
-                {navBuild.map((item) => {
+              <div className="space-y-0.5">
+                {navSetup.map((item) => {
                   const active = pathname === item.href || pathname.startsWith(item.href + "/");
                   return (
                     <Link
                       key={item.name}
                       href={item.href}
                       onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                      className={`flex items-center space-x-3 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
                         active
-                          ? "bg-slate-800 text-white font-semibold border-l-2 border-teal-500"
-                          : "hover:bg-slate-800/60 hover:text-white"
+                          ? "bg-teal-500/10 text-teal-400 font-bold border-l-2 border-teal-500"
+                          : "hover:bg-slate-850 hover:text-white"
                       }`}
                     >
-                      <item.icon className={`w-4 h-4 ${active ? "text-teal-400" : "text-slate-500"}`} />
+                      <item.icon className={`w-3.5 h-3.5 ${active ? "text-teal-400" : "text-slate-500"}`} />
                       <span>{item.name}</span>
                     </Link>
                   );
                 })}
               </div>
             </div>
+
+            {/* Operations & Monitoring Section */}
+            <div>
+              <label className="px-3 text-[10px] font-black tracking-widest text-slate-500 uppercase block mb-2">
+                Operations & Monitoring
+              </label>
+              <div className="space-y-0.5">
+                {navMonitoring.map((item) => {
+                  const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      onClick={() => setSidebarOpen(false)}
+                      className={`flex items-center space-x-3 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
+                        active
+                          ? "bg-teal-500/10 text-teal-400 font-bold border-l-2 border-teal-500"
+                          : "hover:bg-slate-850 hover:text-white"
+                      }`}
+                    >
+                      <item.icon className={`w-3.5 h-3.5 ${active ? "text-teal-400" : "text-slate-500"}`} />
+                      <span>{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Campaigns Section */}
+            <div>
+              <label className="px-3 text-[10px] font-black tracking-widest text-slate-500 uppercase block mb-2">
+                Campaigns
+              </label>
+              <div className="space-y-0.5">
+                {navCampaigns.map((item) => {
+                  const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      onClick={() => setSidebarOpen(false)}
+                      className={`flex items-center space-x-3 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
+                        active
+                          ? "bg-teal-500/10 text-teal-400 font-bold border-l-2 border-teal-500"
+                          : "hover:bg-slate-850 hover:text-white"
+                      }`}
+                    >
+                      <item.icon className={`w-3.5 h-3.5 ${active ? "text-teal-400" : "text-slate-500"}`} />
+                      <span>{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Account & Billing Section */}
+            <div>
+              <label className="px-3 text-[10px] font-black tracking-widest text-slate-500 uppercase block mb-2">
+                Account & Billing
+              </label>
+              <div className="space-y-0.5">
+                {navBilling.map((item) => {
+                  const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      onClick={() => setSidebarOpen(false)}
+                      className={`flex items-center space-x-3 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
+                        active
+                          ? "bg-teal-500/10 text-teal-400 font-bold border-l-2 border-teal-500"
+                          : "hover:bg-slate-850 hover:text-white"
+                      }`}
+                    >
+                      <item.icon className={`w-3.5 h-3.5 ${active ? "text-teal-400" : "text-slate-500"}`} />
+                      <span>{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
           </div>
         </div>
 
         {/* Footer profile panel & settings actions */}
-        <div className="p-4 border-t border-slate-850 flex flex-col space-y-3 bg-slate-950/40">
+        <div className="p-4 border-t border-slate-800 flex flex-col space-y-3 bg-slate-950/40">
           <div className="flex items-center justify-between px-2">
-            <span className="text-xs text-slate-500 font-mono">Credits</span>
+            <span className="text-[10px] text-slate-500 font-bold uppercase">Balance</span>
             <span className="text-xs px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 font-bold font-mono">
-              {credits >= 1000 ? `${(credits / 100).toFixed(1)}H` : `₹${Math.round(credits)}`}
+              ₹{credits.toFixed(2)}
             </span>
           </div>
 
@@ -167,8 +250,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             rel="noreferrer"
             className="flex items-center justify-center space-x-2 py-2 rounded-lg border border-slate-700 hover:border-teal-500/50 hover:bg-slate-800 text-xs font-bold text-white transition-all cursor-pointer text-center"
           >
-            <span>Hire an Expert</span>
-            <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+            <span>Book a Meeting</span>
+            <ExternalLink className="w-3 h-3 text-slate-500" />
           </a>
 
           <div className="flex items-center justify-between border-t border-slate-800 pt-3">
@@ -220,7 +303,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
           
           <div className="text-sm font-bold text-slate-500 dark:text-slate-400 flex items-center space-x-1.5">
-            <span>Auris Workspace</span>
+            <span>Workspace</span>
             <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20">
               Live
             </span>
@@ -232,7 +315,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 text-xs font-bold hover:bg-teal-500/20 transition-all"
             >
               <Sparkles className="w-3.5 h-3.5 text-teal-500" />
-              <span>Top Up Credits</span>
+              <span>Top up wallet</span>
             </Link>
           </div>
         </header>
