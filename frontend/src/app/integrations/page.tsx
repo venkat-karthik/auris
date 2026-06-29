@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "@/components/Providers";
 import DashboardLayout from "@/components/DashboardLayout";
 import { toast } from "sonner";
 import {
@@ -11,7 +12,8 @@ import {
   ExternalLink,
   Search,
   CheckCircle,
-  HelpCircle
+  HelpCircle,
+  Loader2
 } from "lucide-react";
 
 interface IntegrationItem {
@@ -23,7 +25,11 @@ interface IntegrationItem {
 }
 
 export default function IntegrationsPage() {
+  const { token } = useAuth();
   const [activeCategory, setActiveCategory] = useState<string>("All");
+  const [loading, setLoading] = useState(true);
+  const [toggleLoading, setToggleLoading] = useState<string | null>(null);
+
   const [integrations, setIntegrations] = useState<IntegrationItem[]>([
     {
       name: "Cal.com",
@@ -44,7 +50,7 @@ export default function IntegrationsPage() {
       category: "Custom & Tools",
       timing: "During Call",
       description: "Connect to any custom API endpoint to extend your assistant's capabilities with external data and services.",
-      connected: true
+      connected: false
     },
     {
       name: "Salesforce",
@@ -69,20 +75,68 @@ export default function IntegrationsPage() {
     }
   ]);
 
-  const categories = ["All", "Calendar & CRM", "Messaging", "Data & Sheets", "Custom & Tools"];
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
-  const handleToggleConnection = (name: string) => {
-    setIntegrations((prev) =>
-      prev.map((item) => {
-        if (item.name === name) {
-          const nextState = !item.connected;
-          toast.success(`${item.name} is now ${nextState ? "Connected" : "Disconnected"}`);
-          return { ...item, connected: nextState };
-        }
-        return item;
-      })
-    );
+  const fetchIntegrations = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/integrations`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Update integrations with connected state from DB
+        setIntegrations((prev) =>
+          prev.map((item) => {
+            const dbItem = data.find((d: any) => d.service_name.toLowerCase() === item.name.toLowerCase());
+            return {
+              ...item,
+              connected: dbItem ? dbItem.is_connected : false
+            };
+          })
+        );
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    fetchIntegrations();
+  }, [token]);
+
+  const handleToggleConnection = async (name: string, currentConnected: boolean) => {
+    setToggleLoading(name);
+    try {
+      const res = await fetch(`${API_URL}/integrations/toggle`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          service_name: name.toLowerCase(),
+          is_connected: !currentConnected
+        })
+      });
+
+      if (res.ok) {
+        toast.success(`${name} is now ${!currentConnected ? "Connected" : "Disconnected"}`);
+        fetchIntegrations();
+      } else {
+        toast.error("Failed to update connection settings");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error modifying connection");
+    } finally {
+      setToggleLoading(null);
+    }
+  };
+
+  const categories = ["All", "Calendar & CRM", "Messaging", "Data & Sheets", "Custom & Tools"];
 
   const filteredIntegrations = integrations.filter(
     (item) => activeCategory === "All" || item.category === activeCategory
@@ -130,57 +184,64 @@ export default function IntegrationsPage() {
         </div>
 
         {/* Grid cards list */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredIntegrations.map((item) => (
-            <div
-              key={item.name}
-              className="glass rounded-2xl p-6 shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
-            >
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-teal-500/10 dark:bg-teal-500/20 text-teal-500 flex items-center justify-center font-bold">
-                    {item.name[0]}
+        {loading ? (
+          <div className="h-64 w-full flex items-center justify-center">
+            <Loader2 className="w-10 h-10 text-teal-500 animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredIntegrations.map((item) => (
+              <div
+                key={item.name}
+                className="glass rounded-2xl p-6 shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
+              >
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="w-10 h-10 rounded-xl bg-teal-500/10 dark:bg-teal-500/20 text-teal-500 flex items-center justify-center font-bold">
+                      {item.name[0]}
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      item.timing === "During Call" 
+                        ? "bg-teal-500/10 text-teal-400 border border-teal-500/20" 
+                        : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                    }`}>
+                      {item.timing}
+                    </span>
                   </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                    item.timing === "During Call" 
-                      ? "bg-teal-500/10 text-teal-400 border border-teal-500/20" 
-                      : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                  }`}>
-                    {item.timing}
-                  </span>
+
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-base leading-snug">{item.name}</h3>
+                    <p className="text-[10px] text-slate-500">{item.category}</p>
+                  </div>
+
+                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-3 min-h-[48px]">
+                    {item.description}
+                  </p>
                 </div>
 
-                <div className="space-y-1">
-                  <h3 className="font-bold text-base leading-snug">{item.name}</h3>
-                  <p className="text-[10px] text-slate-500">{item.category}</p>
+                <div className="flex items-center justify-between pt-6 border-t border-slate-100 dark:border-zinc-800/80 mt-6">
+                  <button
+                    disabled={toggleLoading === item.name}
+                    onClick={() => handleToggleConnection(item.name, item.connected)}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      item.connected
+                        ? "bg-rose-500/15 text-rose-500 hover:bg-rose-500/25"
+                        : "bg-teal-500 hover:bg-teal-600 text-white shadow-md shadow-teal-500/20"
+                    }`}
+                  >
+                    {toggleLoading === item.name ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : item.connected ? "Disconnect" : "Connect"}
+                  </button>
+                  {item.connected && (
+                    <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span>Connected</span>
+                    </span>
+                  )}
                 </div>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-3 min-h-[48px]">
-                  {item.description}
-                </p>
               </div>
-
-              <div className="flex items-center justify-between pt-6 border-t border-slate-100 dark:border-zinc-800/80 mt-6">
-                <button
-                  onClick={() => handleToggleConnection(item.name)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    item.connected
-                      ? "bg-rose-500/15 text-rose-500 hover:bg-rose-500/25"
-                      : "bg-teal-500 hover:bg-teal-600 text-white shadow-md shadow-teal-500/20"
-                  }`}
-                >
-                  {item.connected ? "Disconnect" : "Connect"}
-                </button>
-                {item.connected && (
-                  <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold">
-                    <CheckCircle className="w-3.5 h-3.5" />
-                    <span>Connected</span>
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

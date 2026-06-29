@@ -30,16 +30,7 @@ interface Agent {
 
 export default function WhatsappNumbersPage() {
   const { token } = useAuth();
-  const [whatsappNumbers, setWhatsappNumbers] = useState<WhatsappNumber[]>([
-    {
-      id: 1,
-      phone_number: "+918309827125",
-      label: "Support Line",
-      is_active: true,
-      agent_id: null,
-      agent_name: null
-    }
-  ]);
+  const [whatsappNumbers, setWhatsappNumbers] = useState<WhatsappNumber[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -52,26 +43,26 @@ export default function WhatsappNumbersPage() {
   const fetchWhatsappNumbersAndAgents = async () => {
     if (!token) return;
     try {
-      // Fetch agents to bind to
+      // 1. Fetch agents to bind to
       const agentsRes = await fetch(`${API_URL}/agents`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (agentsRes.ok) {
         const data = await agentsRes.json();
         setAgents(data);
-        if (data.length > 0) {
-          // prefill first agent for first list item
-          setWhatsappNumbers((prev) =>
-            prev.map((num) => ({
-              ...num,
-              agent_id: data[0].id,
-              agent_name: data[0].name
-            }))
-          );
-        }
+      }
+
+      // 2. Fetch linked WhatsApp numbers
+      const waRes = await fetch(`${API_URL}/whatsapp`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (waRes.ok) {
+        const data = await waRes.json();
+        setWhatsappNumbers(data);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Error loading WhatsApp channels:", err);
+      toast.error("Failed to load WhatsApp settings");
     } finally {
       setLoading(false);
     }
@@ -81,50 +72,84 @@ export default function WhatsappNumbersPage() {
     fetchWhatsappNumbersAndAgents();
   }, [token]);
 
-  const handleAddNumber = (e: React.FormEvent) => {
+  const handleAddNumber = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNumber.trim()) {
       toast.error("Please enter a WhatsApp number");
       return;
     }
     setCreateLoading(true);
-    setTimeout(() => {
-      const item: WhatsappNumber = {
-        id: Date.now(),
-        phone_number: newNumber,
-        label: newLabel,
-        is_active: true,
-        agent_id: agents[0]?.id || null,
-        agent_name: agents[0]?.name || null
-      };
-      setWhatsappNumbers((prev) => [...prev, item]);
-      setNewNumber("");
-      setModalOpen(false);
+    try {
+      const res = await fetch(`${API_URL}/whatsapp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          phone_number: newNumber,
+          label: newLabel
+        })
+      });
+
+      if (res.ok) {
+        toast.success("WhatsApp channel connected successfully!");
+        setNewNumber("");
+        setModalOpen(false);
+        fetchWhatsappNumbersAndAgents();
+      } else {
+        const errData = await res.json();
+        toast.error(errData.detail || "Failed to register WhatsApp channel");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error registering number");
+    } finally {
       setCreateLoading(false);
-      toast.success("WhatsApp channel connected successfully!");
-    }, 800);
+    }
   };
 
-  const handleDeleteNumber = (id: number) => {
-    setWhatsappNumbers((prev) => prev.filter((n) => n.id !== id));
-    toast.success("WhatsApp channel disconnected");
+  const handleDeleteNumber = async (id: number) => {
+    if (!confirm("Are you sure you want to disconnect this WhatsApp number?")) return;
+    try {
+      const res = await fetch(`${API_URL}/whatsapp/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        toast.success("WhatsApp channel disconnected");
+        fetchWhatsappNumbersAndAgents();
+      } else {
+        toast.error("Failed to disconnect number");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error deleting channel connection");
+    }
   };
 
-  const handleBindAgent = (id: number, agentId: number) => {
-    const selectedAgent = agents.find((a) => a.id === agentId);
-    setWhatsappNumbers((prev) =>
-      prev.map((num) => {
-        if (num.id === id) {
-          toast.success(`WhatsApp bound to ${selectedAgent?.name}`);
-          return {
-            ...num,
-            agent_id: agentId,
-            agent_name: selectedAgent?.name || null
-          };
-        }
-        return num;
-      })
-    );
+  const handleBindAgent = async (id: number, agentId: number) => {
+    try {
+      const res = await fetch(`${API_URL}/whatsapp/${id}/bind`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          agent_id: agentId || null
+        })
+      });
+      if (res.ok) {
+        toast.success("WhatsApp agent binding updated successfully!");
+        fetchWhatsappNumbersAndAgents();
+      } else {
+        toast.error("Failed to bind agent to WhatsApp channel");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error setting channel routing");
+    }
   };
 
   return (
@@ -154,7 +179,9 @@ export default function WhatsappNumbersPage() {
           <div className="lg:col-span-2 space-y-6">
             <div className="glass rounded-2xl p-6 space-y-4">
               <h2 className="text-lg font-bold">Connected WhatsApp Numbers</h2>
-              {whatsappNumbers.length === 0 ? (
+              {loading ? (
+                <div className="py-8 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-teal-500" /></div>
+              ) : whatsappNumbers.length === 0 ? (
                 <p className="text-xs text-slate-400 py-12 text-center">
                   No WhatsApp numbers linked to your workspace yet.
                 </p>
@@ -165,7 +192,7 @@ export default function WhatsappNumbersPage() {
                       <div>
                         <p className="font-mono text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
                           <span>{num.phone_number}</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-bold font-sans">
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold font-sans border border-emerald-500/20">
                             Phone WhatsApp
                           </span>
                         </p>

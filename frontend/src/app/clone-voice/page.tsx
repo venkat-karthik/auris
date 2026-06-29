@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "@/components/Providers";
 import DashboardLayout from "@/components/DashboardLayout";
 import { toast } from "sonner";
 import {
@@ -15,29 +16,45 @@ import {
 } from "lucide-react";
 
 interface ClonedVoice {
-  id: string;
+  id: number;
   name: string;
-  samplesCount: number;
+  voice_id: string;
   status: "ready" | "processing";
   created_at: string;
 }
 
 export default function CloneVoicePage() {
-  const [voices, setVoices] = useState<ClonedVoice[]>([
-    {
-      id: "voice-1",
-      name: "Karthik Professional Voice",
-      samplesCount: 1,
-      status: "ready",
-      created_at: "2 days ago"
-    }
-  ]);
-
+  const { token } = useAuth();
+  const [voices, setVoices] = useState<ClonedVoice[]>([]);
+  const [loading, setLoading] = useState(true);
   const [voiceName, setVoiceName] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [cloningLoading, setCloningLoading] = useState(false);
+
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+  const fetchClonedVoices = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/cloned-voices`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVoices(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchClonedVoices();
+  }, [token]);
 
   const startRecording = () => {
     setIsRecording(true);
@@ -47,7 +64,8 @@ export default function CloneVoicePage() {
   const stopRecording = () => {
     setIsRecording(false);
     toast.success("Voice sample recorded successfully!");
-    setRecordedBlob(new Blob());
+    // Create mock audio blob
+    setRecordedBlob(new Blob(["mock-speech-sample-content"], { type: "audio/wav" }));
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -57,38 +75,48 @@ export default function CloneVoicePage() {
     }
   };
 
-  const handleCloneVoice = (e: React.FormEvent) => {
+  const handleCloneVoice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!voiceName.trim()) {
       toast.error("Please enter a name for the cloned voice");
       return;
     }
-    if (!recordedBlob && !uploadFile) {
+    const fileToUpload = uploadFile || (recordedBlob ? new File([recordedBlob], "mic_recording.wav", { type: "audio/wav" }) : null);
+    if (!fileToUpload) {
       toast.error("Please record audio or upload a voice sample first");
       return;
     }
 
     setCloningLoading(true);
-    setTimeout(() => {
-      const newVoice: ClonedVoice = {
-        id: `voice-${Date.now()}`,
-        name: voiceName,
-        samplesCount: 1,
-        status: "processing",
-        created_at: "Just now"
-      };
-      setVoices((prev) => [newVoice, ...prev]);
-      setVoiceName("");
-      setUploadFile(null);
-      setRecordedBlob(null);
-      setCloningLoading(false);
-      toast.success("AI voice cloning request initialized!");
-    }, 1200);
-  };
+    const formData = new FormData();
+    formData.append("name", voiceName);
+    formData.append("file", fileToUpload);
 
-  const handleDeleteVoice = (id: string) => {
-    setVoices((prev) => prev.filter((v) => v.id !== id));
-    toast.success("Cloned voice deleted");
+    try {
+      const res = await fetch(`${API_URL}/cloned-voices/upload`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (res.ok) {
+        toast.success("AI voice cloning request registered successfully!");
+        setVoiceName("");
+        setUploadFile(null);
+        setRecordedBlob(null);
+        fetchClonedVoices();
+      } else {
+        const errData = await res.json();
+        toast.error(errData.detail || "Failed to clone voice");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error connecting to voice engine pipeline");
+    } finally {
+      setCloningLoading(false);
+    }
   };
 
   return (
@@ -170,14 +198,16 @@ export default function CloneVoicePage() {
           <div className="space-y-6">
             <div className="glass rounded-2xl p-6 space-y-4">
               <h2 className="text-lg font-bold">My Cloned Voices</h2>
-              {voices.length === 0 ? (
+              {loading ? (
+                <div className="py-4 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-teal-500" /></div>
+              ) : voices.length === 0 ? (
                 <p className="text-xs text-slate-400 py-6 text-center">
                   You haven't cloned any custom voices yet.
                 </p>
               ) : (
                 <div className="space-y-3">
                   {voices.map((v) => (
-                    <div key={v.id} className="p-3 rounded-xl border border-slate-150 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/40 flex items-center justify-between gap-3 text-xs">
+                    <div key={v.id} className="p-3 rounded-xl border border-slate-150 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/40 flex flex-col justify-between gap-2 text-xs">
                       <div>
                         <p className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
                           <span>{v.name}</span>
@@ -187,14 +217,8 @@ export default function CloneVoicePage() {
                             {v.status}
                           </span>
                         </p>
-                        <p className="text-[10px] text-slate-400 mt-1">Created {v.created_at}</p>
+                        <p className="text-[9px] text-slate-400 font-mono mt-1 select-all">Voice ID: {v.voice_id}</p>
                       </div>
-                      <button
-                        onClick={() => handleDeleteVoice(v.id)}
-                        className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </div>
                   ))}
                 </div>

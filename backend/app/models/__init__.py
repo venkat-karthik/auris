@@ -9,6 +9,10 @@ from app.models.customer_profile import CustomerProfile
 from app.models.knowledge_base import KnowledgeBaseDocument, KnowledgeBaseChunk
 from app.models.campaign import Campaign, CampaignContact
 from app.models.phone_number import PhoneNumber
+from app.models.whatsapp_number import WhatsappNumber
+from app.models.integration import Integration
+from app.models.cloned_voice import ClonedVoice
+from app.models.reseller_query import ResellerQuery
 
 __all__ = [
     "User",
@@ -24,4 +28,8 @@ __all__ = [
     "Campaign",
     "CampaignContact",
     "PhoneNumber",
+    "WhatsappNumber",
+    "Integration",
+    "ClonedVoice",
+    "ResellerQuery",
 ]

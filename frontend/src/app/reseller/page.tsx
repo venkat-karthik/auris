@@ -21,13 +21,48 @@ export default function ResellerRequestPage() {
   const [useCase, setUseCase] = useState("I have a product question regarding setting up subaccounts.");
   const [submitLoading, setSubmitLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name || !email || !phone || !useCase) {
+      toast.error("Please fill in all required form fields");
+      return;
+    }
+
     setSubmitLoading(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${API_URL}/reseller`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          phone,
+          volume,
+          interest,
+          use_case: useCase
+        })
+      });
+
+      if (res.ok) {
+        toast.success("Reseller application query registered successfully! Our team will contact you soon.");
+        setName("");
+        setEmail("");
+        setPhone("+91");
+        setUseCase("");
+      } else {
+        const data = await res.json();
+        toast.error(data.detail || "Failed to submit reseller form");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error submitting partner inquiry");
+    } finally {
       setSubmitLoading(false);
-      toast.success("Reseller program query submitted successfully! Our agency relations team will contact you shortly.");
-    }, 1000);
+    }
   };
 
   return (

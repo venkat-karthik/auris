@@ -22,6 +22,10 @@ from app.routes.api_keys import router as api_keys_router
 from app.routes.phone_numbers import router as phone_numbers_router
 from app.routes.analytics import router as analytics_router
 from app.routes.monitor import router as monitor_router
+from app.routes.whatsapp import router as whatsapp_router
+from app.routes.integrations import router as integrations_router
+from app.routes.cloned_voices import router as cloned_voices_router
+from app.routes.reseller import router as reseller_router
 from app.dependencies.rate_limit import check_rate_limit
 
 
@@ -64,6 +68,10 @@ app.include_router(campaigns_router, prefix=API_PREFIX, dependencies=[Depends(ch
 app.include_router(api_keys_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(phone_numbers_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(analytics_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(whatsapp_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(integrations_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(cloned_voices_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(reseller_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(monitor_router, prefix=API_PREFIX)
 
 
