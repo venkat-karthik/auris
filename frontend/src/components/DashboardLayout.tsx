@@ -63,6 +63,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navSetup = [
     { name: "Voice AI Assistants", href: "/agents", icon: Bot },
+    { name: "Workflow Canvas", href: "/builder", icon: Sparkles },
     { name: "Clone Voice", href: "/clone-voice", icon: Mic },
     { name: "Files", href: "/files", icon: FileText },
     { name: "Integrations", href: "/integrations", icon: Boxes },
