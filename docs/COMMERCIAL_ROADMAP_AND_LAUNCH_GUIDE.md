@@ -98,3 +98,49 @@ Promote Auris on **Product Hunt**, **Hacker News**, **LinkedIn**, and **X (Twitt
 - [x] **Developer Documentation**: Connect the included `docs/` Mintlify directory to host public docs at `docs.yourdomain.com`.
 - [x] **Website Embed Widget**: Utilize the built-in `/public-embed` API routes to let enterprise customers embed voice customer support widgets on their websites with a single `<script>` tag.
 - [x] **Agency / White-Label Distribution**: Package Auris as a dedicated "Voice AI Agency in a Box" where you deploy dedicated tenant instances for enterprise call centers.
+
+---
+
+## 🚀 6. Future Roadmap (Version 2): Selling Phone Numbers from Local Inventory
+
+To avoid querying and renting virtual phone numbers dynamically from carrier APIs (Telnyx/Twilio) on demand, you can pre-purchase phone numbers in bulk and resell them directly to your customers inside the Auris platform.
+
+### A. Database Inventory Table
+Create a database table `available_inventory` to store pre-bought phone numbers:
+```python
+class AvailableInventory(Base):
+    __tablename__ = "available_inventory"
+    id = Column(Integer, primary_key=True)
+    phone_number = Column(String(32), unique=True, nullable=False)
+    region = Column(String(64))
+    is_leased = Column(Boolean, default=False)
+```
+
+### B. Route Replacement: Search available numbers
+Replace the live Telnyx/Twilio API search logic inside `phone_numbers.py` to query your local pre-bought table instead:
+```python
+@router.get("/search")
+async def search_available_numbers(area_code: str, db: AsyncSession = Depends(get_db)):
+    # Query your own database for unleased numbers matching the area code
+    query = select(AvailableInventory).where(
+        AvailableInventory.is_leased == False,
+        AvailableInventory.phone_number.like(f"%{area_code}%")
+    )
+    result = await db.execute(query)
+    inventory_items = result.scalars().all()
+    
+    return [
+        SearchNumbersResponse(
+            phone_number=item.phone_number,
+            region=item.region,
+            monthly_cost_usd=2.00
+        ) for item in inventory_items
+    ]
+```
+
+### C. Route Replacement: Purchase & Lease Line
+Inside the `/buy` route of `phone_numbers.py`, instead of triggering a live API call to purchase/lease a number from Telnyx:
+1. Lookup the number in `AvailableInventory`.
+2. Update the number state: set `is_leased = True`.
+3. Create the regular customer `PhoneNumber` mapping and deduct their credits.
+

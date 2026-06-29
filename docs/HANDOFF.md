@@ -368,3 +368,45 @@ A business owner uploads their info, picks a language, and has a working AI
 receptionist in 5 minutes. In Hindi. In Telugu. In English.
 
 That's what no one else is doing. That's the gap. That's Auris.
+
+---
+
+## 🚀 Future Development (Version 2): Selling Phone Numbers from Local Inventory
+
+For Version 2 implementation, instead of querying available virtual numbers dynamically from Twilio or Telnyx APIs (which charges you for active phone lines that may sit idle), the platform is designed to sell phone lines from your own pre-purchased inventory.
+
+### 1. Database Model
+Store unassigned bulk numbers in a table:
+```python
+class AvailableInventory(Base):
+    __tablename__ = "available_inventory"
+    id = Column(Integer, primary_key=True)
+    phone_number = Column(String(32), unique=True, nullable=False)
+    region = Column(String(64))
+    is_leased = Column(Boolean, default=False)
+```
+
+### 2. Search Numbers Endpoint (`GET /phone-numbers/search`)
+Query the `AvailableInventory` table directly:
+```python
+@router.get("/search")
+async def search_available_numbers(area_code: str, db: AsyncSession = Depends(get_db)):
+    query = select(AvailableInventory).where(
+        AvailableInventory.is_leased == False,
+        AvailableInventory.phone_number.like(f"%{area_code}%")
+    )
+    result = await db.execute(query)
+    inventory_items = result.scalars().all()
+    
+    return [
+        SearchNumbersResponse(
+            phone_number=item.phone_number,
+            region=item.region,
+            monthly_cost_usd=2.00
+        ) for item in inventory_items
+    ]
+```
+
+### 3. Lease Number Endpoint (`POST /phone-numbers/buy`)
+Upon success, deduct client balance, create their regular `PhoneNumber` routing mapping, and set `inventory_item.is_leased = True`.
+
