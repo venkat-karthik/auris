@@ -56,7 +56,7 @@ interface CallOutcome {
   count: number;
 }
 
-const COLORS = ["#0ea5e9", "#f43f5e", "#eab308", "#6b7280", "#a855f7", "#10b981"];
+const COLORS = ["#14b8a6", "#6366f1", "#06b6d4", "#a855f7", "#ec4899", "#10b981"];
 
 export default function DashboardPage() {
   const { token } = useAuth();
@@ -183,7 +183,7 @@ export default function DashboardPage() {
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Credits Balance Card */}
-          <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
+          <div className="glass transition-all duration-300 hover:-translate-y-0.5 glow-indigo p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Credit Balance</span>
               <p className="text-3xl font-black text-indigo-600 dark:text-indigo-400">
@@ -196,7 +196,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Call Minutes Card */}
-          <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
+          <div className="glass transition-all duration-300 hover:-translate-y-0.5 glow-teal p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Call Minutes</span>
               <p className="text-3xl font-black text-teal-600 dark:text-teal-400">
@@ -209,7 +209,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Active Agents Card */}
-          <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
+          <div className="glass transition-all duration-300 hover:-translate-y-0.5 glow-indigo p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active Agents</span>
               <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400">
@@ -222,7 +222,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Total Calls Card */}
-          <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
+          <div className="glass transition-all duration-300 hover:-translate-y-0.5 glow-teal p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Calls Handled</span>
               <p className="text-3xl font-black text-sky-600 dark:text-sky-400">

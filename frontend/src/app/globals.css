@@ -21,6 +21,19 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
 }
 
+/* Premium Designer Background Patterns */
+body {
+  background-color: #f8fafc;
+  background-image: radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.02) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+.dark body {
+  background-color: #030303;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.03) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
 /* Glassmorphism helpers */
 .glass {
   background: rgba(255, 255, 255, 0.45);
@@ -30,41 +43,35 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .dark .glass {
-  background: rgba(13, 13, 20, 0.5);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(10, 10, 12, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
 }
 
-/* Beautiful soothing animated backgrounds */
-.bg-gradient-soothing {
-  background: linear-gradient(-45deg, #eef2ff, #f0fdf4, #f5f3ff, #ecfeff);
-  background-size: 400% 400%;
-  animation: soothing-gradient 15s ease infinite;
+/* Elite premium custom dashboard elements */
+.glass-premium {
+  background: rgba(10, 10, 12, 0.85);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
-.dark .bg-gradient-soothing {
-  background: linear-gradient(-45deg, #09090b, #051419, #0d061c, #02120e);
-  background-size: 400% 400%;
-  animation: soothing-gradient 15s ease infinite;
+.glow-teal:hover {
+  border-color: rgba(20, 184, 166, 0.4);
+  box-shadow: 0 0 25px rgba(20, 184, 166, 0.12);
 }
 
-@keyframes soothing-gradient {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
+.glow-indigo:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 25px rgba(99, 102, 241, 0.12);
 }
 
 /* Custom Scrollbar for premium feel */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -77,7 +84,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: #27272a;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -85,5 +92,5 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: #3f3f46;
 }

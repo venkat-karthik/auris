@@ -148,9 +148,9 @@ export default function AgentsPage() {
           
           <button
             onClick={() => setModalOpen(true)}
-            className="flex items-center justify-center space-x-2 px-5 py-3 rounded-xl bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white font-semibold shadow-lg shadow-teal-500/20 dark:shadow-none hover:shadow-xl hover:shadow-teal-500/35 transition-all cursor-pointer"
+            className="flex items-center justify-center space-x-2 px-5 py-3 rounded-xl bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white font-bold text-xs shadow-md shadow-teal-500/20 transition-all cursor-pointer"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4" />
             <span>Create Agent</span>
           </button>
         </div>
@@ -181,28 +181,28 @@ export default function AgentsPage() {
             {agents.map((agent) => (
               <div
                 key={agent.id}
-                className="glass rounded-2xl p-6 shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col justify-between group relative overflow-hidden"
+                className="glass glow-teal rounded-2xl p-6 shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col justify-between group relative overflow-hidden"
               >
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <div className="p-2.5 bg-teal-500/10 dark:bg-teal-500/20 text-teal-500 rounded-xl group-hover:scale-110 transition-transform">
-                      <Bot className="w-5 h-5" />
+                    <div className="p-2 bg-teal-500/10 dark:bg-teal-500/20 text-teal-500 rounded-xl group-hover:scale-105 transition-transform">
+                      <Bot className="w-4.5 h-4.5" />
                     </div>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20">
+                    <span className="text-[9px] tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-extrabold border border-emerald-500/20 uppercase">
                       Active
                     </span>
                   </div>
 
                   <div className="space-y-1">
-                    <h3 className="font-bold text-lg leading-snug group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
+                    <h3 className="font-black text-base leading-snug group-hover:text-teal-400 transition-colors">
                       {agent.name}
                     </h3>
-                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                    <p className="text-[9px] font-mono text-slate-400 dark:text-slate-500 tracking-wider">
                       ID: {agent.id}
                     </p>
                   </div>
 
-                  <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-3 min-h-[60px]">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-3 min-h-[48px]">
                     {agent.description || "No description provided."}
                   </p>
                 </div>
@@ -210,17 +210,17 @@ export default function AgentsPage() {
                 <div className="flex items-center space-x-3 pt-6 border-t border-slate-100 dark:border-zinc-800/60 mt-6">
                   <Link
                     href={`/agents/${agent.id}`}
-                    className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-900/50 text-sm font-semibold transition-colors"
+                    className="flex-1 flex items-center justify-center space-x-1.5 py-2 rounded-xl border border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-900/50 text-xs font-bold transition-colors"
                   >
-                    <Settings2 className="w-4 h-4 text-slate-400" />
+                    <Settings2 className="w-3.5 h-3.5 text-slate-400" />
                     <span>Configure</span>
                   </Link>
                   <button
                     onClick={() => handleDeleteAgent(agent.id)}
-                    className="p-2.5 rounded-xl text-rose-500 hover:bg-rose-500/5 dark:hover:bg-rose-500/10 border border-transparent hover:border-rose-500/10 transition-all cursor-pointer"
+                    className="p-2 rounded-xl text-rose-500 hover:bg-rose-500/5 dark:hover:bg-rose-500/10 border border-transparent hover:border-rose-500/10 transition-all cursor-pointer"
                     title="Delete Agent"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
