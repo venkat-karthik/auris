@@ -22,8 +22,10 @@ async def test_warm_transfer_call_not_found(mock_session_local):
 
 
 @pytest.mark.asyncio
+@patch("app.services.transfer_manager._sync_create_conference")
+@patch("app.services.transfer_manager._sync_add_participant")
 @patch("app.services.transfer_manager.AsyncSessionLocal")
-async def test_warm_transfer_success(mock_session_local):
+async def test_warm_transfer_success(mock_session_local, mock_add_part, mock_create_conf):
     mock_db = AsyncMock()
     
     mock_call = MagicMock(spec=CallRun)
@@ -44,9 +46,11 @@ async def test_warm_transfer_success(mock_session_local):
     mock_db.execute = AsyncMock()
     mock_db.execute.side_effect = [mock_call_result, mock_agent_result]
     mock_session_local.return_value.__aenter__.return_value = mock_db
+    
+    mock_create_conf.return_value = "AurisTransfer-1"
 
     result = await warm_transfer(1, 2)
     
     assert result is True
-    assert mock_call.recording_path.startswith("conf-")
+    assert mock_call.recording_path == "AurisTransfer-1"
     mock_db.commit.assert_called_once()

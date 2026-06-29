@@ -1,13 +1,16 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.voicemail_detection import VoicemailDetector
 
 @pytest.mark.asyncio
-@patch("openai.Audio.atranscribe", new_callable=AsyncMock)
+@patch("openai.AsyncOpenAI")
 @patch.dict("os.environ", {"OPENAI_API_KEY": "mock-key"})
-async def test_detect_voicemail_whisper_positive(mock_transcribe):
-    # Mock Whisper response showing voicemail cues
-    mock_transcribe.return_value = {"text": "Please leave a message after the tone"}
+async def test_detect_voicemail_whisper_positive(mock_async_openai):
+    mock_client = MagicMock()
+    mock_transcription = MagicMock()
+    mock_transcription.text = "Please leave a message after the tone"
+    mock_client.audio.transcriptions.create = AsyncMock(return_value=mock_transcription)
+    mock_async_openai.return_value = mock_client
     
     audio_bytes = b"mock audio content"
     result = await VoicemailDetector.detect(audio_bytes)
@@ -17,11 +20,14 @@ async def test_detect_voicemail_whisper_positive(mock_transcribe):
 
 
 @pytest.mark.asyncio
-@patch("openai.Audio.atranscribe", new_callable=AsyncMock)
+@patch("openai.AsyncOpenAI")
 @patch.dict("os.environ", {"OPENAI_API_KEY": "mock-key"})
-async def test_detect_voicemail_whisper_negative(mock_transcribe):
-    # Mock Whisper response showing standard customer conversation
-    mock_transcribe.return_value = {"text": "Hello, I want to check my account balance"}
+async def test_detect_voicemail_whisper_negative(mock_async_openai):
+    mock_client = MagicMock()
+    mock_transcription = MagicMock()
+    mock_transcription.text = "Hello, I want to check my account balance"
+    mock_client.audio.transcriptions.create = AsyncMock(return_value=mock_transcription)
+    mock_async_openai.return_value = mock_client
     
     audio_bytes = b"mock audio content"
     result = await VoicemailDetector.detect(audio_bytes)
