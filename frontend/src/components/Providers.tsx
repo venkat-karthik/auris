@@ -25,6 +25,8 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
+import { getApiUrl } from "@/lib/api";
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -34,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+  const API_URL = getApiUrl();
 
   const refreshUser = React.useCallback(async (authToken?: string) => {
     const activeToken = authToken || token || localStorage.getItem("auris_token");

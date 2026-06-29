@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
 import { useAuth } from "@/components/Providers";
+import { getApiUrl } from "@/lib/api";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -12,7 +13,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+  const API_URL = getApiUrl();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
