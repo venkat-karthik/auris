@@ -14,7 +14,13 @@ export default function LandingPage() {
             Auris
           </span>
         </Link>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-6">
+          <Link
+            href="/pricing"
+            className="text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors"
+          >
+            Pricing
+          </Link>
           <Link
             href="/auth/login"
             className="text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors"
