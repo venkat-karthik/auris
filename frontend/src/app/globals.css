@@ -38,13 +38,13 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Beautiful soothing animated backgrounds */
 .bg-gradient-soothing {
-  background: linear-gradient(-45deg, #fff1f2, #f5f3ff, #ecfeff, #fffbeb);
+  background: linear-gradient(-45deg, #eef2ff, #f0fdf4, #f5f3ff, #ecfeff);
   background-size: 400% 400%;
   animation: soothing-gradient 15s ease infinite;
 }
 
 .dark .bg-gradient-soothing {
-  background: linear-gradient(-45deg, #030014, #0a0118, #000c14, #120015);
+  background: linear-gradient(-45deg, #09090b, #051419, #0d061c, #02120e);
   background-size: 400% 400%;
   animation: soothing-gradient 15s ease infinite;
 }

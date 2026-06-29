@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -141,6 +140,7 @@ export default function AgentDetailPage() {
     }
   };
 
+  // --- WebRTC / WebSocket Voice Testing logic ---
   // --- WebRTC / WebSocket Voice Testing logic ---
   const startVoiceTest = async () => {
     setIsCalling(true);
@@ -326,7 +326,7 @@ export default function AgentDetailPage() {
     return (
       <DashboardLayout>
         <div className="h-[70vh] w-full flex items-center justify-center">
-          <Loader2 className="w-10 h-10 text-purple-500 animate-spin" />
+          <Loader2 className="w-10 h-10 text-teal-500 animate-spin" />
         </div>
       </DashboardLayout>
     );
@@ -347,7 +347,7 @@ export default function AgentDetailPage() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-3xl font-extrabold tracking-tight">{name}</h1>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 font-bold border border-fuchsia-500/20">
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 font-bold border border-teal-500/20">
                   v1.0
                 </span>
               </div>
@@ -360,7 +360,7 @@ export default function AgentDetailPage() {
           <button
             onClick={handleSave}
             disabled={saveLoading}
-            className="flex items-center justify-center space-x-2 px-5 py-3 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-semibold shadow-lg shadow-fuchsia-500/25 dark:shadow-none hover:shadow-xl hover:shadow-fuchsia-500/35 transition-all cursor-pointer disabled:opacity-75"
+            className="flex items-center justify-center space-x-2 px-5 py-3 rounded-xl bg-teal-500 hover:bg-teal-600 text-white font-semibold shadow-lg shadow-teal-500/25 dark:shadow-none hover:shadow-xl hover:shadow-teal-500/35 transition-all cursor-pointer disabled:opacity-75"
           >
             {saveLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
             <span>Save Configuration</span>
@@ -373,7 +373,7 @@ export default function AgentDetailPage() {
             onClick={() => setActiveTab("prompt")}
             className={`flex items-center gap-2 px-6 py-3 border-b-2 font-bold text-sm transition-all cursor-pointer ${
               activeTab === "prompt"
-                ? "border-fuchsia-500 text-fuchsia-600 dark:text-fuchsia-400"
+                ? "border-teal-500 text-teal-600 dark:text-teal-400"
                 : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
             }`}
           >
@@ -383,7 +383,7 @@ export default function AgentDetailPage() {
             onClick={() => setActiveTab("model")}
             className={`flex items-center gap-2 px-6 py-3 border-b-2 font-bold text-sm transition-all cursor-pointer ${
               activeTab === "model"
-                ? "border-fuchsia-500 text-fuchsia-600 dark:text-fuchsia-400"
+                ? "border-teal-500 text-teal-600 dark:text-teal-400"
                 : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
             }`}
           >
@@ -393,7 +393,7 @@ export default function AgentDetailPage() {
             onClick={() => setActiveTab("test")}
             className={`flex items-center gap-2 px-6 py-3 border-b-2 font-bold text-sm transition-all cursor-pointer ${
               activeTab === "test"
-                ? "border-fuchsia-500 text-fuchsia-600 dark:text-fuchsia-400"
+                ? "border-teal-500 text-teal-600 dark:text-teal-400"
                 : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
             }`}
           >
@@ -413,7 +413,7 @@ export default function AgentDetailPage() {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
                   />
                 </div>
                 <div className="space-y-1">
@@ -422,7 +422,7 @@ export default function AgentDetailPage() {
                     type="text"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
                   />
                 </div>
               </div>
@@ -434,7 +434,7 @@ export default function AgentDetailPage() {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="Insert detailed guidelines for the AI receptionist..."
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm font-mono leading-relaxed"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm font-mono leading-relaxed"
                 />
               </div>
             </div>
@@ -444,7 +444,7 @@ export default function AgentDetailPage() {
           {activeTab === "model" && (
             <div className="glass p-6 md:p-8 rounded-2xl shadow-sm space-y-6">
               <h3 className="font-bold text-lg flex items-center gap-2">
-                <Database className="text-purple-500 w-5 h-5" /> Pipeline Settings
+                <Database className="text-indigo-500 w-5 h-5" /> Pipeline Settings
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -454,14 +454,14 @@ export default function AgentDetailPage() {
                   <select
                     value={language}
                     onChange={(e) => setLanguage(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
                   >
                     <option value="en">English (US/UK)</option>
                     <option value="hi">Hindi (हिंदी)</option>
                     <option value="te">Telugu (తెలుగు)</option>
                     <option value="ta">Tamil (தமிழ்)</option>
                     <option value="kn">Kannada (ಕನ್ನಡ)</option>
-                    <option value="mr">Marathi (మరాठी)</option>
+                    <option value="mr">Marathi (मराठी)</option>
                   </select>
                 </div>
 
@@ -471,7 +471,7 @@ export default function AgentDetailPage() {
                   <select
                     value={costTier}
                     onChange={(e) => setCostTier(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
                   >
                     <option value="economy">Economy (Groq / Llama)</option>
                     <option value="standard">Standard (GPT-4o mini)</option>
@@ -485,7 +485,7 @@ export default function AgentDetailPage() {
                   <select
                     value={llmProvider}
                     onChange={(e) => setLlmProvider(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
                   >
                     <option value="openai">OpenAI (Default)</option>
                     <option value="groq">Groq (Ultra low latency)</option>
@@ -498,7 +498,7 @@ export default function AgentDetailPage() {
                   <select
                     value={sttProvider}
                     onChange={(e) => setSttProvider(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
                   >
                     <option value="deepgram">Deepgram (Best English)</option>
                     <option value="sarvam">Sarvam STT (Best Hindi/Telugu/Tamil)</option>
@@ -511,7 +511,7 @@ export default function AgentDetailPage() {
                   <select
                     value={ttsProvider}
                     onChange={(e) => setTtsProvider(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm"
                   >
                     <option value="elevenlabs">ElevenLabs (High-fidelity English)</option>
                     <option value="sarvam">Sarvam Bulbul (Expressive Indian voices)</option>
@@ -529,14 +529,14 @@ export default function AgentDetailPage() {
                 <div className="relative">
                   {/* Glowing ring animation */}
                   {isCalling && (
-                    <div className="absolute inset-0 rounded-full bg-fuchsia-500/20 animate-ping" />
+                    <div className="absolute inset-0 rounded-full bg-teal-500/20 animate-ping" />
                   )}
                   <button
                     onClick={isCalling ? stopVoiceTest : startVoiceTest}
                     className={`relative p-8 rounded-full shadow-2xl flex items-center justify-center transition-all transform active:scale-95 cursor-pointer ${
                       isCalling
                         ? "bg-rose-500 text-white hover:bg-rose-600 shadow-rose-500/25"
-                        : "bg-fuchsia-500 text-white hover:bg-fuchsia-600 shadow-fuchsia-500/25"
+                        : "bg-teal-500 text-white hover:bg-teal-600 shadow-teal-500/25"
                     }`}
                   >
                     {isCalling ? <MicOff className="w-10 h-10" /> : <Mic className="w-10 h-10" />}
@@ -553,7 +553,7 @@ export default function AgentDetailPage() {
                 </div>
 
                 {isCalling && (
-                  <div className="flex items-center space-x-2 text-xs px-3 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 animate-pulse border border-fuchsia-500/20 font-semibold">
+                  <div className="flex items-center space-x-2 text-xs px-3 py-1 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 animate-pulse border border-teal-500/20 font-semibold">
                     <Volume2 className="w-3.5 h-3.5" />
                     <span>Realtime WebRTC Connected</span>
                   </div>
@@ -564,7 +564,7 @@ export default function AgentDetailPage() {
               <div className="glass p-6 md:p-8 rounded-2xl shadow-sm flex flex-col space-y-4 lg:col-span-2 min-h-[350px]">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800/80 pb-3">
                   <h3 className="font-bold flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-purple-500" /> Live Conversation
+                    <Sparkles className="w-4 h-4 text-teal-500" /> Live Conversation
                   </h3>
                   {isCalling && (
                     <button
@@ -595,7 +595,7 @@ export default function AgentDetailPage() {
                         <div
                           className={`p-3 rounded-2xl text-sm ${
                             t.sender === "user"
-                              ? "bg-purple-500 text-white rounded-tr-none"
+                              ? "bg-teal-500 text-white rounded-tr-none"
                               : "bg-slate-100 dark:bg-zinc-800/80 text-slate-800 dark:text-slate-100 rounded-tl-none"
                           }`}
                         >

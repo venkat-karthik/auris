@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import DashboardPage from "../src/app/dashboard/page";

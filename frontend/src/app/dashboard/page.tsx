@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useEffect, useState } from "react";
@@ -57,7 +56,7 @@ interface CallOutcome {
   count: number;
 }
 
-const COLORS = ["#d946ef", "#8b5cf6", "#06b6d4", "#a855f7", "#6b7280", "#10b981"];
+const COLORS = ["#0ea5e9", "#f43f5e", "#eab308", "#6b7280", "#a855f7", "#10b981"];
 
 export default function DashboardPage() {
   const { token } = useAuth();
@@ -164,7 +163,7 @@ export default function DashboardPage() {
     return (
       <DashboardLayout>
         <div className="h-[70vh] w-full flex items-center justify-center">
-          <Loader2 className="w-10 h-10 text-fuchsia-500 animate-spin" />
+          <Loader2 className="w-10 h-10 text-teal-500 animate-spin" />
         </div>
       </DashboardLayout>
     );
@@ -187,11 +186,11 @@ export default function DashboardPage() {
           <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Credit Balance</span>
-              <p className="text-3xl font-black text-fuchsia-600 dark:text-fuchsia-400">
+              <p className="text-3xl font-black text-indigo-600 dark:text-indigo-400">
                 ₹{balance.toLocaleString()}
               </p>
             </div>
-            <div className="p-3 bg-fuchsia-500/10 dark:bg-fuchsia-500/20 text-fuchsia-500 rounded-xl">
+            <div className="p-3 bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-500 rounded-xl">
               <Coins className="w-6 h-6" />
             </div>
           </div>
@@ -200,11 +199,11 @@ export default function DashboardPage() {
           <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Call Minutes</span>
-              <p className="text-3xl font-black text-purple-600 dark:text-purple-400">
+              <p className="text-3xl font-black text-teal-600 dark:text-teal-400">
                 {totalMinutes} min
               </p>
             </div>
-            <div className="p-3 bg-purple-500/10 dark:bg-purple-500/20 text-purple-500 rounded-xl">
+            <div className="p-3 bg-teal-500/10 dark:bg-teal-500/20 text-teal-500 rounded-xl">
               <Clock className="w-6 h-6" />
             </div>
           </div>
@@ -213,11 +212,11 @@ export default function DashboardPage() {
           <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active Agents</span>
-              <p className="text-3xl font-black text-cyan-600 dark:text-cyan-400">
+              <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400">
                 {agentsCount}
               </p>
             </div>
-            <div className="p-3 bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-500 rounded-xl">
+            <div className="p-3 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-500 rounded-xl">
               <Bot className="w-6 h-6" />
             </div>
           </div>
@@ -226,11 +225,11 @@ export default function DashboardPage() {
           <div className="glass p-6 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Calls Handled</span>
-              <p className="text-3xl font-black text-violet-600 dark:text-violet-400">
+              <p className="text-3xl font-black text-sky-600 dark:text-sky-400">
                 {calls.length}
               </p>
             </div>
-            <div className="p-3 bg-violet-500/10 dark:bg-violet-500/20 text-violet-500 rounded-xl">
+            <div className="p-3 bg-sky-500/10 dark:bg-sky-500/20 text-sky-500 rounded-xl">
               <PhoneCall className="w-6 h-6" />
             </div>
           </div>
@@ -242,7 +241,7 @@ export default function DashboardPage() {
           <div className="lg:col-span-2 glass p-6 rounded-2xl shadow-sm flex flex-col space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <TrendingUp className="w-5 h-5 text-purple-500" />
+                <TrendingUp className="w-5 h-5 text-teal-500" />
                 <h3 className="font-bold text-lg">Call Volume Trend</h3>
               </div>
               <span className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
@@ -255,8 +254,8 @@ export default function DashboardPage() {
                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorCalls" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#a855f7" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} opacity={0.15} />
@@ -271,7 +270,7 @@ export default function DashboardPage() {
                       fontSize: "12px"
                     }}
                   />
-                  <Area type="monotone" dataKey="Calls" stroke="#a855f7" strokeWidth={2.5} fillOpacity={1} fill="url(#colorCalls)" />
+                  <Area type="monotone" dataKey="Calls" stroke="#14b8a6" strokeWidth={2.5} fillOpacity={1} fill="url(#colorCalls)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -280,7 +279,7 @@ export default function DashboardPage() {
           {/* Call Outcome Distribution */}
           <div className="glass p-6 rounded-2xl shadow-sm flex flex-col space-y-6">
             <div className="flex items-center space-x-2">
-              <PieIcon className="w-5 h-5 text-purple-500" />
+              <PieIcon className="w-5 h-5 text-indigo-500" />
               <h3 className="font-bold text-lg">Call Outcomes</h3>
             </div>
 
@@ -338,7 +337,7 @@ export default function DashboardPage() {
           <div className="lg:col-span-2 glass p-6 rounded-2xl shadow-sm flex flex-col space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <BarChart2 className="w-5 h-5 text-purple-500" />
+                <BarChart2 className="w-5 h-5 text-indigo-500" />
                 <h3 className="font-bold text-lg">Agent Performance & Conversions</h3>
               </div>
             </div>
@@ -359,8 +358,8 @@ export default function DashboardPage() {
                     }}
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" />
-                  <Bar name="Calls Handled" dataKey="call_count" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={30} />
-                  <Bar name="Conversion Rate (%)" dataKey="conversion_rate" fill="#06b6d4" radius={[4, 4, 0, 0]} barSize={30} />
+                  <Bar name="Calls Handled" dataKey="call_count" fill="#0ea5e9" radius={[4, 4, 0, 0]} barSize={30} />
+                  <Bar name="Conversion Rate (%)" dataKey="conversion_rate" fill="#10b981" radius={[4, 4, 0, 0]} barSize={30} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

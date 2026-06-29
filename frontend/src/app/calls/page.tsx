@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useEffect, useState } from "react";
@@ -29,8 +28,8 @@ interface CallRun {
   called_number: string | null;
   duration_seconds: number | null;
   disposition: string | null;
+  voicemail: boolean | null;
   created_at: string;
-  voicemail?: boolean;
 }
 
 export default function CallLogsPage() {
@@ -81,11 +80,14 @@ export default function CallLogsPage() {
       }
     } catch (err) {
       console.error(err);
-      toast.error("Error loading agents");
+      toast.error("Network error loading agents");
     }
   };
 
-  useEffect(() => { fetchCalls(); fetchAgents(); }, [token]);
+  useEffect(() => {
+    fetchCalls();
+    fetchAgents();
+  }, [token]);
 
   const viewCallDetails = async (call: CallRun) => {
     setSelectedCall(call);
@@ -180,29 +182,27 @@ export default function CallLogsPage() {
         ) : (
           <div className="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200/50 dark:border-zinc-800/60">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
+              <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-slate-100/55 dark:bg-zinc-900/50 text-slate-400 dark:text-slate-500 border-b border-slate-200/60 dark:border-zinc-800/60 font-bold uppercase tracking-wider text-[11px]">
+                  <tr className="border-b border-slate-100 dark:border-zinc-800/80 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-zinc-900/50">
                     <th className="py-4 px-6">ID</th>
-                    <th className="py-4 px-6">Type</th>
+                    <th className="py-4 px-6">Transport</th>
                     <th className="py-4 px-6">Caller ID</th>
                     <th className="py-4 px-6">Status</th>
                     <th className="py-4 px-6">Duration</th>
-                    <th className="py-4 px-6">Timestamp</th>
-                    <th className="py-4 px-6 text-right">Action</th>
+                    <th className="py-4 px-6">Date</th>
+                    <th className="py-4 px-6 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/40">
+                <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/50 text-sm">
                   {calls.map((call) => (
                     <tr
                       key={call.id}
-                      className="hover:bg-slate-100/30 dark:hover:bg-zinc-900/20 transition-colors"
+                      className="hover:bg-slate-50/40 dark:hover:bg-zinc-900/40 transition-colors"
                     >
-                      <td className="py-4 px-6 font-bold text-slate-900 dark:text-white">
-                        #{call.id}
-                      </td>
+                      <td className="py-4 px-6 font-semibold">#{call.id}</td>
                       <td className="py-4 px-6">
-                        <span className="text-xs px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800 font-semibold">
+                        <span className="capitalize font-medium text-slate-700 dark:text-slate-300">
                           {call.transport === "webrtc" ? "Browser" : "Telephony"}
                         </span>
                       </td>
@@ -329,7 +329,7 @@ export default function CallLogsPage() {
                         <div
                           className={`p-3 rounded-2xl text-xs ${
                             t.sender === "user"
-                              ? "bg-purple-500 text-white rounded-tr-none"
+                              ? "bg-teal-500 text-white rounded-tr-none"
                               : "bg-slate-100 dark:bg-zinc-800/80 text-slate-800 dark:text-slate-100 rounded-tl-none"
                           }`}
                         >
@@ -343,14 +343,14 @@ export default function CallLogsPage() {
             </div>
           </div>
         )}
-        
+
         {/* Transfer Modal */}
         {transferModalOpen && selectedCall && (
           <Dialog open={transferModalOpen} onOpenChange={setTransferModalOpen}>
-            <DialogHeader>
-              <DialogTitle>Warm Transfer Call #{selectedCall.id}</DialogTitle>
-            </DialogHeader>
             <DialogContent className="space-y-4">
+              <DialogHeader>
+                <DialogTitle>Warm Transfer Call #{selectedCall.id}</DialogTitle>
+              </DialogHeader>
               <Select value={targetAgentId?.toString() ?? ""} onValueChange={(v) => setTargetAgentId(parseInt(v))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select target agent" />
@@ -361,10 +361,10 @@ export default function CallLogsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <DialogFooter>
+                <Button onClick={handleTransfer} disabled={targetAgentId === null}>Transfer</Button>
+              </DialogFooter>
             </DialogContent>
-            <DialogFooter>
-              <Button onClick={handleTransfer} disabled={targetAgentId === null}>Transfer</Button>
-            </DialogFooter>
           </Dialog>
         )}
       </div>

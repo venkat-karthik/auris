@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useAuth } from "@/components/Providers";
@@ -38,7 +37,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   ];
 
   return (
-    <div className="min-h-screen flex bg-slate-50 dark:bg-[#030014] text-slate-800 dark:text-slate-200">
+    <div className="min-h-screen flex bg-slate-50 dark:bg-[#07070a] text-slate-800 dark:text-slate-200">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
@@ -57,7 +56,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Logo / Title */}
           <div className="px-6 flex items-center justify-between">
             <Link href="/dashboard" className="flex items-center space-x-2">
-              <span className="text-2xl font-black bg-gradient-to-r from-fuchsia-500 via-purple-600 to-indigo-500 bg-clip-text text-transparent dark:from-fuchsia-400 dark:via-purple-400 dark:to-cyan-400">
+              <span className="text-2xl font-black bg-gradient-to-r from-teal-500 to-indigo-600 bg-clip-text text-transparent dark:from-teal-400 dark:to-indigo-400">
                 Auris
               </span>
             </Link>
@@ -80,11 +79,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   onClick={() => setSidebarOpen(false)}
                   className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
                     active
-                      ? "bg-gradient-to-r from-purple-500/10 to-fuchsia-500/10 text-purple-600 dark:text-purple-400 border-l-4 border-purple-500"
+                      ? "bg-gradient-to-r from-teal-500/10 to-indigo-500/10 text-teal-600 dark:text-teal-400 border-l-4 border-teal-500"
                       : "hover:bg-slate-200/30 dark:hover:bg-zinc-800/20 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
                   }`}
                 >
-                  <item.icon className={`w-5 h-5 ${active ? "text-purple-500" : "text-slate-400 dark:text-slate-500"}`} />
+                  <item.icon className={`w-5 h-5 ${active ? "text-teal-500" : "text-slate-400 dark:text-slate-500"}`} />
                   <span>{item.name}</span>
                 </Link>
               );
@@ -95,7 +94,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Footer profile panel & logout */}
         <div className="p-4 border-t border-slate-100 dark:border-zinc-800/60 flex flex-col space-y-3">
           <div className="flex items-center space-x-3 px-2">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-fuchsia-400 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-teal-400 to-indigo-500 flex items-center justify-center text-white font-bold text-sm">
               {user?.full_name ? user.full_name[0].toUpperCase() : "U"}
             </div>
             <div className="flex-1 overflow-hidden">

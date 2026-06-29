@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, @typescript-eslint/no-unused-vars */
 "use client";
 
 import * as React from "react";
@@ -92,12 +91,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/dashboard");
   };
 
-  function logout() {
+  const logout = () => {
     setUser(null);
     setToken(null);
     localStorage.removeItem("auris_token");
     router.push("/auth/login");
-  }
+  };
 
   return (
     <AuthContext.Provider

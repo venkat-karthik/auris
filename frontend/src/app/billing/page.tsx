@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState } from "react";
@@ -162,7 +161,7 @@ export default function BillingPage() {
           email: user?.email || ""
         },
         theme: {
-          color: "#d946ef" // fuchsia-500 brand color
+          color: "#14b8a6" // teal-500 brand color
         }
       };
 
@@ -182,7 +181,7 @@ export default function BillingPage() {
     return (
       <DashboardLayout>
         <div className="h-[70vh] w-full flex items-center justify-center">
-          <Loader2 className="w-10 h-10 text-purple-500 animate-spin" />
+          <Loader2 className="w-10 h-10 text-teal-500 animate-spin" />
         </div>
       </DashboardLayout>
     );
@@ -194,7 +193,7 @@ export default function BillingPage() {
         {/* Header */}
         <div className="space-y-2">
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
-            <Coins className="text-purple-500 w-8 h-8" /> Billing & Balance
+            <Coins className="text-teal-500 w-8 h-8" /> Billing & Balance
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Recharge your credit balance (1 rupee = 1 credit), buy pre-paid limits or request high volume B2B quotes.
@@ -211,7 +210,7 @@ export default function BillingPage() {
             <div className="glass p-6 md:p-8 rounded-3xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative overflow-hidden">
               <div className="space-y-3">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Remaining Balance</span>
-                <h2 className="text-5xl font-black text-fuchsia-600 dark:text-fuchsia-400">
+                <h2 className="text-5xl font-black text-indigo-600 dark:text-indigo-400">
                   ₹{balance.toLocaleString()}
                 </h2>
                 <p className="text-xs text-slate-400 dark:text-slate-500">
@@ -219,7 +218,7 @@ export default function BillingPage() {
                 </p>
               </div>
               <div className="flex-shrink-0">
-                <div className="w-20 h-20 rounded-2xl bg-fuchsia-500/10 dark:bg-fuchsia-500/20 text-fuchsia-500 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-2xl bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-500 flex items-center justify-center">
                   <Coins className="w-10 h-10 animate-bounce" />
                 </div>
               </div>
@@ -237,7 +236,7 @@ export default function BillingPage() {
                     onClick={() => setAmount(p)}
                     className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border cursor-pointer ${
                       amount === p
-                        ? "bg-fuchsia-500 border-fuchsia-500 text-white shadow-md shadow-fuchsia-500/25"
+                        ? "bg-teal-500 border-teal-500 text-white shadow-md shadow-teal-500/25"
                         : "border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-900/50 text-slate-600 dark:text-slate-300"
                     }`}
                   >
@@ -256,7 +255,7 @@ export default function BillingPage() {
                     value={amount || ""}
                     onChange={(e) => setAmount(Number(e.target.value))}
                     placeholder="Enter custom recharge value"
-                    className="w-full pl-8 pr-4 py-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all text-sm font-bold"
+                    className="w-full pl-8 pr-4 py-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 transition-all text-sm font-bold"
                   />
                 </div>
               </div>
@@ -265,7 +264,7 @@ export default function BillingPage() {
               <button
                 onClick={handlePurchase}
                 disabled={checkoutLoading || amount <= 0}
-                className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white font-bold shadow-lg shadow-fuchsia-500/25 dark:shadow-none hover:shadow-xl hover:shadow-fuchsia-500/35 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed text-sm"
+                className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white font-bold shadow-lg shadow-teal-500/25 dark:shadow-none hover:shadow-xl hover:shadow-teal-500/35 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed text-sm"
               >
                 {checkoutLoading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -287,7 +286,7 @@ export default function BillingPage() {
           {/* Transaction listing column */}
           <div className="glass p-6 md:p-8 rounded-3xl shadow-sm flex flex-col space-y-4 h-[440px]">
             <div className="flex items-center space-x-2 pb-3 border-b border-slate-100 dark:border-zinc-800/80">
-              <TrendingUp className="w-5 h-5 text-purple-500" />
+              <TrendingUp className="w-5 h-5 text-indigo-500" />
               <h3 className="font-bold text-lg">Transactions</h3>
             </div>
 
@@ -314,7 +313,7 @@ export default function BillingPage() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-black text-purple-600 dark:text-purple-400">
+                      <p className="font-black text-teal-600 dark:text-teal-400">
                         + ₹{tx.credits_added}
                       </p>
                       <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-400">
