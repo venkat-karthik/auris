@@ -7,6 +7,8 @@ import json
 import base64
 from datetime import UTC, datetime
 from loguru import logger
+import xml.sax.saxutils as saxutils
+from urllib.parse import quote
 
 from app.services.pipeline.transport.telnyx_transport import TelnyxTransport
 from app.services.pipeline.transport.twilio_transport import TwilioTransport
@@ -338,6 +340,9 @@ async def telnyx_ws(
                 
                 await db_session.commit()
 
+        from app.routes.calls import charge_final_credits
+        await charge_final_credits(run_id, org_id, duration, agent.model_config)
+
         # Enqueue background tasks on ARQ worker
         try:
             from arq import create_pool
@@ -366,14 +371,14 @@ async def inbound_telnyx(
 ):
     from app.core.config import BACKEND_URL
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
-    ws_url = f"{ws_base}/api/v1/telephony/ws/telnyx?call_control_id={call_control_id}&org_id={org_id}&agent_id={agent_id}&call_type={call_type}"
+    ws_url = f"{ws_base}/api/v1/telephony/ws/telnyx?call_control_id={quote(call_control_id)}&org_id={org_id}&agent_id={agent_id}&call_type={quote(call_type)}"
     if from_number:
-        ws_url += f"&from={from_number}"
+        ws_url += f"&from={quote(from_number)}"
     if to_number:
-        ws_url += f"&to={to_number}"
-    return {
-        "texml": f"<Response><Connect><WebSocket url='{ws_url}'/></Connect></Response>"
-    }
+        ws_url += f"&to={quote(to_number)}"
+    
+    twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Connect><WebSocket url={saxutils.quoteattr(ws_url)}/></Connect></Response>'
+    return Response(content=twiml, media_type="application/xml")
 
 
 @router.post("/telephony/inbound/twilio")
@@ -387,14 +392,14 @@ async def inbound_twilio(
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
     ws_url = f"{ws_base}/api/v1/telephony/ws/twilio?org_id={org_id}&agent_id={agent_id}"
     if From:
-        ws_url += f"&from={From}"
+        ws_url += f"&from={quote(From)}"
     if To:
-        ws_url += f"&to={To}"
+        ws_url += f"&to={quote(To)}"
 
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="{ws_url}" />
+        <Stream url={saxutils.quoteattr(ws_url)} />
     </Connect>
 </Response>"""
     return Response(content=twiml, media_type="application/xml")
@@ -481,26 +486,105 @@ async def twilio_ws(
     # build pipeline
     pipeline = build_pipeline(agent.model_config, system_prompt=system_prompt, language=language)
 
-    # Tool execution callback helper (identical)
+    # Find LLM processor and register tools
     llm_processor = None
-    for p in pipeline._processors:
-        if p.__class__.__name__ in ("OpenAILLM", "GroqLLM"):
+    for p in pipeline.processors:
+        if p.name in ("openai-llm", "groq-llm"):
             llm_processor = p
             break
 
-    if llm_processor:
-        @llm_processor.event_handler("tool_call")
-        async def on_tool_call(name: str, args: dict, call_id: str):
-            result = None
-            if name == "transfer_call":
-                dest = args.get("destination_number")
-                if dest:
-                    from app.services.transfer_manager import TransferManager
-                    asyncio.create_task(TransferManager.transfer(run_id, dest))
-                    result = {"status": "transfer_initiated"}
-            elif name == "transition_node":
-                val = args.get("value")
-                if workflow_state:
+    tools = []
+    # Register search_knowledge_base if organization has documents
+    async with AsyncSessionLocal() as session:
+        from app.models.knowledge_base import KnowledgeBaseDocument
+        doc_select = select(KnowledgeBaseDocument).where(
+            KnowledgeBaseDocument.org_id == agent.org_id,
+            (KnowledgeBaseDocument.agent_id == agent.id) | (KnowledgeBaseDocument.agent_id.is_(None))
+        )
+        doc_res = await session.execute(doc_select)
+        has_docs = len(doc_res.scalars().all()) > 0
+
+    if has_docs:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "search_knowledge_base",
+                "description": "Search the knowledge base for documentation, guides, company policies to answer customer queries.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search term or query containing relevant keywords."}
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
+
+    if workflow_state:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "submit_customer_answer",
+                "description": "Submit a validated answer to the question asked, updating the context and transitioning call state.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string", "description": "The extracted value / answer from customer's speech."}
+                    },
+                    "required": ["value"]
+                }
+            }
+        })
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "end_call",
+                "description": "Terminate the call immediately.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+
+    if llm_processor and tools:
+        llm_processor.set_tools(tools)
+
+    transcript_segments = []
+
+    async def collecting_wrapper():
+        frame = await pipeline.collect()
+        if frame:
+            if frame.type == FrameType.STT_TRANSCRIPT:
+                data = frame.data or {}
+                if data.get("is_final"):
+                    text = data.get("text", "").strip()
+                    if text:
+                        transcript_segments.append(f"User: {text}")
+                        from app.services.monitor_tracker import MonitorTracker
+                        MonitorTracker.update_transcript(run_id, text, "user")
+            elif frame.type == FrameType.LLM_TEXT_COMPLETE:
+                data = frame.data or {}
+                text = data.get("text", "").strip()
+                if text:
+                    transcript_segments.append(f"Agent: {text}")
+                    from app.services.monitor_tracker import MonitorTracker
+                    MonitorTracker.update_transcript(run_id, text, "agent")
+            elif frame.type == FrameType.TOOL_CALL:
+                # Intercept tool calls, execute them, and push back TOOL_RESULT
+                data = frame.data or {}
+                name = data.get("name")
+                args = data.get("arguments", {})
+                call_id = data.get("call_id")
+                result = None
+
+                if name == "search_knowledge_base":
+                    query = args.get("query", "")
+                    async with AsyncSessionLocal() as session:
+                        from app.services.rag_service import retrieve_context
+                        result = await retrieve_context(session, agent.id, agent.org_id, query)
+                elif name == "submit_customer_answer" and workflow_state:
+                    val = args.get("value", "")
                     active_node = workflow_state.get_active_node()
                     if active_node and active_node.get("type") == "qa":
                         var_name = active_node.get("data", {}).get("expected_variable", "qa_ans")
@@ -522,25 +606,15 @@ async def twilio_ws(
                             result = {"status": "success", "next_node": next_node.get("id")}
                     else:
                         result = {"status": "success", "next_node": None}
-            elif name == "end_call":
-                from app.services.pipeline.frame import Frame
-                await pipeline.push(Frame(type=FrameType.CALL_END))
-                result = {"status": "call_ended"}
+                elif name == "end_call":
+                    from app.services.pipeline.frame import Frame
+                    await pipeline.push(Frame(type=FrameType.CALL_END))
+                    result = {"status": "call_ended"}
 
-            if result is not None:
-                from app.services.pipeline.frame import Frame
-                await pipeline.push(Frame(type=FrameType.TOOL_RESULT, data={"call_id": call_id, "result": result}))
-
-    transcript_segments = []
-    for p in pipeline._processors:
-        if p.__class__.__name__ == "OpenAILLM" or p.__class__.__name__ == "GroqLLM":
-            @p.event_handler("sentence")
-            async def on_sentence(speaker: str, text: str):
-                transcript_segments.append(f"{speaker.capitalize()}: {text}")
-                from app.services.monitor_tracker import MonitorTracker
-                MonitorTracker.update_transcript(run_id, speaker, text)
-
-    collecting_wrapper = pipeline.output_stream()
+                if result is not None:
+                    from app.services.pipeline.frame import Frame
+                    await pipeline.push(Frame(type=FrameType.TOOL_RESULT, data={"call_id": call_id, "result": result}))
+        return frame
     start_time = datetime.now(UTC)
 
     cost_tier = agent.model_config.get("cost_tier", "standard")
@@ -669,6 +743,9 @@ async def twilio_ws(
                         logger.error(f"Failed to upload transcript to MinIO: {e}")
                 
                 await db_session.commit()
+
+        from app.routes.calls import charge_final_credits
+        await charge_final_credits(run_id, org_id, duration, agent.model_config)
 
         try:
             from arq import create_pool

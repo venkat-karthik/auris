@@ -7,7 +7,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](https://opensource.org/licenses/MIT)
 [![Python FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Next.js 15](https://img.shields.io/badge/Frontend-Next.js_15-black.svg?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL pgvector](https://img.shields.io/badge/Vector_DB-pgvector-336791.svg?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Pytest Verified](https://img.shields.io/badge/Verification-100%25_Pass-brightgreen.svg)]()
 
@@ -118,17 +117,12 @@ pip install -r requirements.txt
 alembic upgrade head
 ```
 
-### 4. Start API & Frontend Studio
+### 4. Start API Server
 ```bash
-# Terminal 1: Backend Server (Port 8000)
+# Backend Server (Port 8000)
 uvicorn app.main:app --reload --port 8000
-
-# Terminal 2: Next.js Studio (Port 3000)
-cd ../frontend
-npm install && npm run dev
 ```
 
-* 🌐 **Frontend Studio**: [http://localhost:3000](http://localhost:3000)
 * 📖 **OpenAPI Swagger Docs**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
 
 ---

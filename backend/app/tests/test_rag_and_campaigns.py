@@ -85,23 +85,21 @@ async def test_workflow_state_execution():
 
 
 @pytest.mark.asyncio
-async def test_rag_upload_and_retrieve(client: AsyncClient, db_session: AsyncSession, test_org, test_user):
-    # Authenticate header mocking is handled in conftest or we mock auth dependencies
+async def test_rag_upload_and_retrieve(client: AsyncClient, db_session: AsyncSession, test_org, test_user, override_auth):
     with (
-        patch("app.dependencies.auth.get_current_org", return_value=test_org),
-        patch("app.dependencies.auth.get_current_user", return_value=test_user),
+        patch("app.tasks.worker.upload_file_to_minio", return_value="minio-path"),
         patch("app.routes.knowledge_base.upload_file_to_minio", return_value="minio-path"),
         patch("app.services.rag_service.generate_embeddings", return_value=[0.1] * 1536)
     ):
         files = {"file": ("test.txt", b"This is the document content to retrieve.", "text/plain")}
-        response = await client.post("/api/v1/knowledge-base/upload", files=files)
+        response = await client.post("/knowledge-base/upload", files=files)
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "test.txt"
 
 
 @pytest.mark.asyncio
-async def test_campaign_dialer_flow(client: AsyncClient, db_session: AsyncSession, test_org, test_user):
+async def test_campaign_dialer_flow(client: AsyncClient, db_session: AsyncSession, test_org, test_user, override_auth):
     # Setup dummy agent in DB
     agent = Agent(
         org_id=test_org.id,
@@ -114,26 +112,22 @@ async def test_campaign_dialer_flow(client: AsyncClient, db_session: AsyncSessio
     await db_session.commit()
     await db_session.refresh(agent)
 
-    with (
-        patch("app.dependencies.auth.get_current_org", return_value=test_org),
-        patch("app.dependencies.auth.get_current_user", return_value=test_user)
-    ):
-        # Create campaign
-        campaign_payload = {"name": "Outbound Test", "agent_id": agent.id}
-        response = await client.post("/api/v1/campaigns", json=campaign_payload)
-        assert response.status_code == 201
-        data = response.json()
-        campaign_id = data["id"]
-        assert data["name"] == "Outbound Test"
+    # Create campaign
+    campaign_payload = {"name": "Outbound Test", "agent_id": agent.id}
+    response = await client.post("/campaigns", json=campaign_payload)
+    assert response.status_code == 201
+    data = response.json()
+    campaign_id = data["id"]
+    assert data["name"] == "Outbound Test"
 
-        # Upload CSV contacts list
-        csv_file = {"file": ("numbers.csv", b"phone,name\n+917777777777,John", "text/csv")}
-        upload_resp = await client.post(f"/api/v1/campaigns/{campaign_id}/contacts/upload", files=csv_file)
-        assert upload_resp.status_code == 200
+    # Upload CSV contacts list
+    csv_file = {"file": ("numbers.csv", b"phone,name\n+917777777777,John", "text/csv")}
+    upload_resp = await client.post(f"/campaigns/{campaign_id}/contacts/upload", files=csv_file)
+    assert upload_resp.status_code == 200
 
-        # Verify stats
-        stats_resp = await client.get(f"/api/v1/campaigns/{campaign_id}/stats")
-        assert stats_resp.status_code == 200
-        stats_data = stats_resp.json()
-        assert stats_data["total_contacts"] == 1
-        assert stats_data["pending"] == 1
+    # Verify stats
+    stats_resp = await client.get(f"/campaigns/{campaign_id}/stats")
+    assert stats_resp.status_code == 200
+    stats_data = stats_resp.json()
+    assert stats_data["total_contacts"] == 1
+    assert stats_data["pending"] == 1

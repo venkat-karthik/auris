@@ -9,7 +9,6 @@ This guide provides step-by-step instructions to set up, configure, and run the 
 Ensure you have the following installed on your host system:
 1. **Docker & Docker Compose**: For database, caching, and storage.
 2. **Python 3.12**: Do not use Python 3.13 or 3.14 as they lack pre-compiled binary wheels for database dependencies.
-3. **Node.js (LTS)** and **npm**: For the web studio interface.
 
 ---
 
@@ -64,22 +63,11 @@ Start the backend API server locally on port `8000`:
 *   **API Health Endpoint**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 *   **Interactive Swagger Documentation**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
 
----
 
-### 6. Install & Start the Next.js Frontend Console
-Open a new terminal window in the `frontend` folder, install Node modules, and run the Next.js dev server:
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-*   **Web Studio URL**: [http://localhost:3000](http://localhost:3000)
 
----
-
-## 🔑 Signup & Login Flow
-There are no default credentials in the database. To log in:
-1. Navigate to [http://localhost:3000/auth/signup](http://localhost:3000/auth/signup) in your browser.
-2. Complete the signup form.
+## 🔑 Signup & Verification Flow
+There are no default credentials in the database. To sign up and authenticate:
+1. Use the Interactive Swagger Documentation at [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs).
+2. Call `POST /api/v1/auth/signup` to create a user.
 3. The server prints a **6-digit verification code** to the terminal logs of your running backend.
-4. Enter the code in your browser to verify your account and automatically log in to the dashboard.
+4. Call `POST /api/v1/auth/verify` with the code to verify your account and obtain a JWT access token.

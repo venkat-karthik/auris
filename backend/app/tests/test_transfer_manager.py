@@ -42,9 +42,12 @@ async def test_warm_transfer_success(mock_session_local, mock_add_part, mock_cre
     
     mock_agent_result = MagicMock()
     mock_agent_result.scalar_one_or_none.return_value = mock_agent
+
+    mock_phone_result = MagicMock()
+    mock_phone_result.scalar_one_or_none.return_value = None
     
     mock_db.execute = AsyncMock()
-    mock_db.execute.side_effect = [mock_call_result, mock_agent_result]
+    mock_db.execute.side_effect = [mock_call_result, mock_agent_result, mock_phone_result]
     mock_session_local.return_value.__aenter__.return_value = mock_db
     
     mock_create_conf.return_value = "AurisTransfer-1"

@@ -12,6 +12,7 @@ from app.services.pipeline.frame import Frame, FrameType
 class MockPipelineEngine:
     def __init__(self, *args, **kwargs):
         self.collect_count = 0
+        self.processors = []
 
     async def start(self):
         pass
@@ -33,11 +34,10 @@ class MockPipelineEngine:
 async def test_inbound_telnyx(client: AsyncClient):
     response = await client.post("/telephony/inbound/telnyx?call_control_id=cc123&org_id=1&agent_id=2")
     assert response.status_code == 200
-    data = response.json()
-    assert "texml" in data
-    assert "cc123" in data["texml"]
-    assert "org_id=1" in data["texml"]
-    assert "agent_id=2" in data["texml"]
+    assert "xml" in response.headers["content-type"]
+    assert "cc123" in response.text
+    assert "org_id=1" in response.text
+    assert "agent_id=2" in response.text
 
 @pytest.mark.asyncio
 async def test_telephony_ws_flow(db_session: AsyncSession, test_org, test_user):

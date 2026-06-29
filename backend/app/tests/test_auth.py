@@ -17,16 +17,27 @@ async def test_signup_success(client: AsyncClient, db_session: AsyncSession):
     response = await client.post("/auth/signup", json=payload)
     assert response.status_code == 201
     data = response.json()
-    assert "access_token" in data
     assert data["user_id"] is not None
-    assert data["org_id"] is not None
+    assert data["is_verified"] is False
 
-    # Check user in DB
+    # Check user in DB and retrieve verification code
     result = await db_session.execute(select(User).where(User.email == "newuser@example.com"))
     user = result.scalar_one_or_none()
     assert user is not None
     assert user.full_name == "New User"
     assert user.selected_org_id == data["org_id"]
+    assert user.verification_code is not None
+
+    # Verify the user
+    verify_payload = {
+        "email": "newuser@example.com",
+        "code": user.verification_code
+    }
+    verify_response = await client.post("/auth/verify", json=verify_payload)
+    assert verify_response.status_code == 200
+    verify_data = verify_response.json()
+    assert "access_token" in verify_data
+    assert verify_data["user_id"] == user.id
 
 @pytest.mark.asyncio
 async def test_signup_duplicate_email(client: AsyncClient, test_user):

@@ -73,8 +73,7 @@ class MonitorTracker:
                 cls.listeners.discard(ws)
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(send_to_all())
-        except Exception as e:
-            logger.debug(f"MonitorTracker.broadcast skipped (no event loop): {e}")
+            loop = asyncio.get_running_loop()
+            loop.create_task(send_to_all())
+        except RuntimeError:
+            logger.debug("MonitorTracker.broadcast skipped (no event loop running)")

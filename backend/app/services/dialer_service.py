@@ -5,8 +5,9 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.config import TELNYX_API_KEY, BACKEND_URL
+from app.core.config import TELNYX_API_KEY, BACKEND_URL, ENVIRONMENT, TELNYX_CONNECTION_ID, TELNYX_CALLER_ID
 from app.models.campaign import CampaignContact, Campaign
+from app.models.phone_number import PhoneNumber
 
 
 def parse_csv_contacts(csv_content: bytes) -> list[dict]:
@@ -77,18 +78,26 @@ async def dial_number(db: AsyncSession, contact_id: int) -> bool:
     # Our inbound telephony webhook receives the answered payload and connects a WebSocket.
     webhook_url = f"{BACKEND_URL}/api/v1/telephony/inbound/telnyx?org_id={campaign.org_id}&agent_id={campaign.agent_id}&call_type=outbound"
     
+    phone_res = await db.execute(
+        select(PhoneNumber).where(PhoneNumber.agent_id == campaign.agent_id, PhoneNumber.is_active == True)
+    )
+    phone_obj = phone_res.scalar_one_or_none()
+    
+    caller_id = phone_obj.phone_number if phone_obj else TELNYX_CALLER_ID
+    connection_id = phone_obj.telnyx_id if (phone_obj and phone_obj.telnyx_id) else TELNYX_CONNECTION_ID
+
     payload = {
         "to": contact.phone_number,
-        "from": "+918309827125",  # hardcoded platform outbound caller ID
+        "from": caller_id,
         "webhook_url": webhook_url,
-        "connection_id": "platform-connection-id"
+        "connection_id": connection_id
     }
     
-    logger.info(f"Dialer: Initiating Telnyx dial-out to {contact.phone_number} for campaign={campaign.id}")
+    logger.info(f"Dialer: Initiating Telnyx dial-out to {contact.phone_number} for campaign={campaign.id} from={caller_id} connection={connection_id}")
     
     # If API keys are local or missing, simulate successful dial
-    if not TELNYX_API_KEY or TELNYX_API_KEY.startswith("mock") or "localhost" in BACKEND_URL:
-        logger.warning("Telnyx API key not configured or localhost URL. Simulating out-dial success.")
+    if not TELNYX_API_KEY or TELNYX_API_KEY.startswith("mock") or ENVIRONMENT in ("local", "test"):
+        logger.warning("Telnyx API key not configured or in local/test environment. Simulating out-dial success.")
         return True
 
     async with httpx.AsyncClient() as client:

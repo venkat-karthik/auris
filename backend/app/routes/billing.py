@@ -32,8 +32,8 @@ class VerifyPaymentRequest(BaseModel):
 
 class VerifyPaymentResponse(BaseModel):
     success: bool
-    credits_added: int
-    new_balance: int
+    credits_added: float
+    new_balance: float
 
 class CreditTransactionResponse(BaseModel):
     id: int
@@ -50,7 +50,7 @@ class CreditTransactionResponse(BaseModel):
         from_attributes = True
 
 class BalanceResponse(BaseModel):
-    balance_credits: int
+    balance_credits: float
     transactions: list[CreditTransactionResponse]
 
 # ---------- Helper ----------
@@ -117,11 +117,11 @@ async def verify_payment(
     ct.status = "completed"
     ct.completed_at = datetime.now(UTC)
     ct.razorpay_payment_id = payload.razorpay_payment_id
-    credits = int(ct.credits_added)
-    org.balance_credits = (org.balance_credits or 0) + credits
+    credits = float(ct.credits_added)
+    org.balance_credits = (org.balance_credits or 0.0) + credits
     db.add(org)  # ensure org update is tracked
     await db.commit()
-    return VerifyPaymentResponse(success=True, credits_added=credits, new_balance=int(org.balance_credits))
+    return VerifyPaymentResponse(success=True, credits_added=credits, new_balance=float(org.balance_credits))
 
 @router.post("/billing/razorpay/webhook")
 async def razorpay_webhook(
@@ -163,7 +163,7 @@ async def razorpay_webhook(
             )
             org = org_result.scalar_one_or_none()
             if org:
-                org.balance_credits = (org.balance_credits or 0) + credits
+                org.balance_credits = (org.balance_credits or 0.0) + credits
                 db.add(org)
             await db.commit()
             return {"status": "processed", "credits_added": credits}
@@ -182,5 +182,5 @@ async def get_balance(
         .order_by(CreditTransaction.created_at.desc())
     )
     transactions = result.scalars().all()
-    return BalanceResponse(balance_credits=int(org.balance_credits or 0), transactions=transactions)
+    return BalanceResponse(balance_credits=float(org.balance_credits or 0.0), transactions=transactions)
 

@@ -42,17 +42,24 @@ class WebRTCTransport:
     async def _receive_loop(self) -> None:
         """Read from browser WebSocket → push into pipeline."""
         import base64
+        started = False
         try:
             async for raw in self.ws.iter_text():
                 msg = json.loads(raw)
                 msg_type = msg.get("type")
 
                 if msg_type == "start":
-                    context = msg.get("context", {})
-                    await self._push(call_start(context))
-                    logger.info("WebRTC call started")
+                    if not started:
+                        context = msg.get("context", {})
+                        await self._push(call_start(context))
+                        started = True
+                        logger.info("WebRTC call started")
 
                 elif msg_type == "audio":
+                    if not started:
+                        await self._push(call_start({}))
+                        started = True
+                        logger.info("WebRTC call started via fallback on first audio frame")
                     pcm = base64.b64decode(msg["data"])
                     await self._push(audio_in(pcm))
 

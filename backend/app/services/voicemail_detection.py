@@ -26,6 +26,30 @@ VOICEMAIL_KEYWORDS = [
 ]
 
 
+def add_wav_header(pcm_bytes: bytes, sample_rate: int = 16000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    import struct
+    byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
+    block_align = num_channels * (bits_per_sample // 8)
+    
+    header = struct.pack(
+        '<4sI4s4sIHHIIHH4sI',
+        b'RIFF',
+        36 + len(pcm_bytes),
+        b'WAVE',
+        b'fmt ',
+        16,
+        1,  # PCM
+        num_channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        b'data',
+        len(pcm_bytes)
+    )
+    return header + pcm_bytes
+
+
 class VoicemailDetector:
     """Detect voicemail in a raw PCM byte stream.
 
@@ -47,7 +71,8 @@ class VoicemailDetector:
 
                 # The SDK requires a file-like object with a `.name` attribute
                 # so it can infer the audio format (we send raw PCM as .wav).
-                audio_file = io.BytesIO(audio_bytes)
+                wav_bytes = add_wav_header(audio_bytes)
+                audio_file = io.BytesIO(wav_bytes)
                 audio_file.name = "audio.wav"
 
                 transcription = await client.audio.transcriptions.create(

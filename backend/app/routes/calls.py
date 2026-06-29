@@ -405,6 +405,8 @@ async def websocket_call(
                         logger.error(f"Failed to upload transcript to MinIO: {e}")
                 
                 await db.commit()
+        
+        await charge_final_credits(run_id, agent.org_id, duration, agent.model_config)
 
         # Enqueue background tasks on ARQ worker
         try:
@@ -621,5 +623,47 @@ async def credit_monitor_loop(run_id: int, org_id: int, cost_tier: str, pipeline
         pass
     except Exception as e:
         logger.error(f"Credit Monitor error: {e}")
+
+
+async def charge_final_credits(run_id: int, org_id: int, duration: float, agent_model_config: dict):
+    """
+    Deducts precise final credits based on call duration and cost tier.
+    Used in finally blocks to ensure billing is updated immediately,
+    independently of ARQ background task.
+    """
+    async with AsyncSessionLocal() as db_session:
+        from app.models.organization import Organization
+        from app.models.call_run import CallRun
+        org_result = await db_session.execute(select(Organization).where(Organization.id == org_id))
+        org_obj = org_result.scalar_one_or_none()
+        if not org_obj:
+            return
+            
+        price_per_second = org_obj.price_per_second_usd
+        if price_per_second is None:
+            cost_tier = agent_model_config.get("cost_tier", "standard")
+            if cost_tier == "economy":
+                price_per_second = 0.0004
+            elif cost_tier == "premium":
+                price_per_second = 0.0016
+            else:
+                price_per_second = 0.0008
+                
+        total_cost_usd = duration * price_per_second
+        total_credits = total_cost_usd * 83.0
+        
+        run_res = await db_session.execute(select(CallRun).where(CallRun.id == run_id))
+        run = run_res.scalar_one_or_none()
+        if run:
+            already_deducted = run.credits_used or 0.0
+            credits_to_deduct = max(0.0, total_credits - already_deducted)
+            
+            org_obj.balance_credits = max(0.0, org_obj.balance_credits - credits_to_deduct)
+            run.credits_used = total_credits
+            run.cost_usd = total_cost_usd
+            db_session.add(run)
+            db_session.add(org_obj)
+            await db_session.commit()
+            logger.info(f"Credit Monitor: Charged final {credits_to_deduct:.4f} credits for call={run_id}. Total: {total_credits:.4f}, already_deducted: {already_deducted:.4f}, New balance: {org_obj.balance_credits:.4f}")
 
 

@@ -9,6 +9,8 @@ os.environ["JWT_SECRET"] = "super-secret-test-key-which-is-long-enough-to-be-sec
 os.environ["RAZORPAY_KEY_ID"] = "rzp_test_123"
 os.environ["RAZORPAY_KEY_SECRET"] = "rzp_test_secret"
 os.environ["RAZORPAY_WEBHOOK_SECRET"] = "rzp_webhook_secret"
+os.environ["TWILIO_ACCOUNT_SID"] = "ACtest"
+os.environ["TWILIO_AUTH_TOKEN"] = "testtoken"
 
 import pytest
 import asyncio
@@ -43,6 +45,9 @@ from app.models.organization import Organization, OrgMember
 from app.models.agent import Agent
 from app.models.billing import CreditTransaction
 from app.core.security import hash_password, create_access_token
+from app.dependencies.auth import get_current_user, get_current_org
+from app.dependencies.rate_limit import check_rate_limit
+
 
 @pytest.fixture(autouse=True)
 async def setup_db():
@@ -73,6 +78,17 @@ async def override_get_db(db_session):
     yield
     app.dependency_overrides.pop(get_db, None)
 
+
+@pytest.fixture(autouse=True)
+async def disable_rate_limit():
+    """Disable Redis-backed rate limiting for all tests (Redis not available in test env)."""
+    async def _no_op():
+        return None
+    app.dependency_overrides[check_rate_limit] = _no_op
+    yield
+    app.dependency_overrides.pop(check_rate_limit, None)
+
+
 @pytest.fixture
 async def test_org(db_session) -> Organization:
     org = Organization(name="Test Org", slug="test-org", balance_credits=100.0)
@@ -87,7 +103,8 @@ async def test_user(db_session, test_org) -> User:
         email="test@example.com",
         password_hash=hash_password("password123"),
         full_name="Test User",
-        selected_org_id=test_org.id
+        selected_org_id=test_org.id,
+        is_verified=True
     )
     db_session.add(user)
     await db_session.commit()
@@ -97,13 +114,28 @@ async def test_user(db_session, test_org) -> User:
     member = OrgMember(org_id=test_org.id, user_id=user.id, role="owner")
     db_session.add(member)
     await db_session.commit()
-    
+
     return user
 
 @pytest.fixture
 async def auth_headers(test_user, test_org) -> dict[str, str]:
     token = create_access_token(user_id=test_user.id, org_id=test_org.id)
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def override_auth(test_user, test_org):
+    """
+    Override FastAPI auth dependencies so tests that call protected endpoints
+    don't need a real JWT or Redis.  Apply this fixture in any test that needs
+    to hit a protected route without going through the full auth flow.
+    """
+    app.dependency_overrides[get_current_user] = lambda: test_user
+    app.dependency_overrides[get_current_org] = lambda: test_org
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_current_org, None)
+
 
 @pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:

@@ -19,6 +19,7 @@ async def test_create_agent(client: AsyncClient, auth_headers, db_session: Async
     data = response.json()
     assert data["name"] == "Test Agent"
     assert data["org_id"] == test_org.id
+    assert data["model_config"]["stt"]["provider"] == "deepgram"
     
     # Check DB
     result = await db_session.execute(select(Agent).where(Agent.id == data["id"]))

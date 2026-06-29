@@ -46,6 +46,7 @@ class MeResponse(BaseModel):
 
 class SignupResponse(BaseModel):
     user_id: int
+    org_id: int
     email: str
     is_verified: bool
     message: str
@@ -109,6 +110,7 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
 
     return SignupResponse(
         user_id=user.id,
+        org_id=org.id,
         email=user.email,
         is_verified=False,
         message="Verification email sent."
@@ -129,7 +131,7 @@ async def verify_code(body: VerifyRequest, db: AsyncSession = Depends(get_db)):
     if not user.verification_code or user.verification_code != body.code:
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
-    if user.verification_expires_at and user.verification_expires_at < datetime.now(UTC):
+    if user.verification_expires_at and user.verification_expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
         raise HTTPException(status_code=400, detail="Verification code has expired")
 
     user.is_verified = True

@@ -16,9 +16,13 @@ async def monitor_ws(websocket: WebSocket):
     try:
         # Send initial list of active calls
         await websocket.send_json({"type": "init", "calls": active_calls})
+        import asyncio
         while True:
-            # We don't expect messages from client, but we must read to detect disconnects
-            await websocket.receive_text()
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                # Send a ping message to detect client silent disconnection
+                await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
         logger.info("Monitor client unsubscribed")
     except Exception as e:

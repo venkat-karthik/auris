@@ -109,16 +109,39 @@ async def retrieve_context(db: AsyncSession, agent_id: int, org_id: int, query: 
     if not doc_ids:
         return ""
 
-    # Similarity search using cosine distance via pgvector
-    chunk_select = (
-        select(KnowledgeBaseChunk, KnowledgeBaseDocument.name)
-        .join(KnowledgeBaseDocument, KnowledgeBaseChunk.document_id == KnowledgeBaseDocument.id)
-        .where(KnowledgeBaseChunk.document_id.in_(doc_ids))
-        .order_by(KnowledgeBaseChunk.embedding.cosine_distance(query_embedding))
-        .limit(limit)
-    )
-    chunk_result = await db.execute(chunk_select)
-    results = chunk_result.all()
+    is_sqlite = db.bind.dialect.name == "sqlite"
+    if is_sqlite:
+        chunk_select = (
+            select(KnowledgeBaseChunk, KnowledgeBaseDocument.name)
+            .join(KnowledgeBaseDocument, KnowledgeBaseChunk.document_id == KnowledgeBaseDocument.id)
+            .where(KnowledgeBaseChunk.document_id.in_(doc_ids))
+        )
+        chunk_result = await db.execute(chunk_select)
+        results = chunk_result.all()
+        
+        import math
+        def cosine_distance_py(vec1, vec2):
+            if not vec1 or not vec2 or len(vec1) != len(vec2):
+                return 1.0
+            dot_product = sum(a * b for a, b in zip(vec1, vec2))
+            norm_a = math.sqrt(sum(a * a for a in vec1))
+            norm_b = math.sqrt(sum(b * b for b in vec2))
+            if norm_a == 0 or norm_b == 0:
+                return 1.0
+            return 1.0 - (dot_product / (norm_a * norm_b))
+        
+        results.sort(key=lambda r: cosine_distance_py(r[0].embedding, query_embedding))
+        results = results[:limit]
+    else:
+        chunk_select = (
+            select(KnowledgeBaseChunk, KnowledgeBaseDocument.name)
+            .join(KnowledgeBaseDocument, KnowledgeBaseChunk.document_id == KnowledgeBaseDocument.id)
+            .where(KnowledgeBaseChunk.document_id.in_(doc_ids))
+            .order_by(KnowledgeBaseChunk.embedding.cosine_distance(query_embedding))
+            .limit(limit)
+        )
+        chunk_result = await db.execute(chunk_select)
+        results = chunk_result.all()
 
     if not results:
         return ""

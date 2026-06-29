@@ -20,14 +20,20 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 # ── Database ──────────────────────────────────────────────────────────────────
-DATABASE_URL = os.environ["DATABASE_URL"]
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://auris:auris@localhost:5432/auris")
 ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
 # ── Redis ─────────────────────────────────────────────────────────────────────
-REDIS_URL = os.environ["REDIS_URL"]
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+if not JWT_SECRET or (ENVIRONMENT == "production" and JWT_SECRET == "change-me-in-production"):
+    if ENVIRONMENT == "production":
+        raise RuntimeError("JWT_SECRET must be configured with a secure key in production!")
+    else:
+        JWT_SECRET = "change-me-in-production-local-only-key-12345"
+
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "720"))
 
@@ -52,6 +58,8 @@ CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
 
 # ── Telephony ─────────────────────────────────────────────────────────────────
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY", "")
+TELNYX_CONNECTION_ID = os.getenv("TELNYX_CONNECTION_ID", "platform-connection-id")
+TELNYX_CALLER_ID = os.getenv("TELNYX_CALLER_ID", "+10000000000")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_CALLER_ID = os.getenv("TWILIO_CALLER_ID", "")

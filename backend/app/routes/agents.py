@@ -11,7 +11,7 @@ class AgentResponse(BaseModel):
     name: str
     description: str | None
     graph: dict
-    model_config_data: dict = Field(..., alias="model_config")
+    model_config_data: dict = Field(..., alias="model_config", validation_alias="model_config")
     context_variables: dict
 
     class Config:

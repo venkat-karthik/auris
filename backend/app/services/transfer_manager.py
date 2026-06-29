@@ -85,13 +85,16 @@ async def warm_transfer(
             logger.error(f"Agent {target_agent_id} not found for warm transfer")
             return False
 
-        agent_phone = getattr(agent, "phone_number", None) or "+1234567890"
+        from app.models.phone_number import PhoneNumber
+        phone_res = await db.execute(select(PhoneNumber).where(PhoneNumber.agent_id == target_agent_id, PhoneNumber.is_active == True))
+        phone_obj = phone_res.scalar_one_or_none()
+        agent_phone = phone_obj.phone_number if phone_obj else "+1234567890"
 
         if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or TWILIO_ACCOUNT_SID.startswith("mock"):
             logger.warning("Twilio keys not set. Simulating warm transfer.")
             conference_name = f"conf-{call_id}-simulated"
         else:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             # Run synchronous Twilio SDK calls in a thread pool
             conference_name = await loop.run_in_executor(
                 None, _sync_create_conference, str(call_id)
