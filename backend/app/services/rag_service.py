@@ -66,6 +66,14 @@ async def ingest_document(db: AsyncSession, doc_id: int, file_data: bytes, file_
             except Exception as ex:
                 logger.error(f"Failed to extract PDF text: {ex}")
                 raise ValueError("Could not extract text from PDF")
+    elif file_name.endswith(".docx"):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(file_data))
+            text = "\n".join([p.text for p in doc.paragraphs])
+        except Exception as ex:
+            logger.error(f"Failed to extract DOCX text: {ex}")
+            raise ValueError("Could not extract text from DOCX")
     else:
         # Assume plain text / txt
         text = file_data.decode("utf-8", errors="ignore")

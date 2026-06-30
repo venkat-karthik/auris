@@ -5,7 +5,9 @@ Handles post-call processing, credit deduction, MinIO uploads, and customer prof
 import os
 import io
 import asyncio
+import json
 from datetime import UTC, datetime
+
 from loguru import logger
 from minio import Minio
 from arq.connections import RedisSettings
@@ -217,6 +219,178 @@ async def update_customer_profile(ctx, call_run_id: int):
             logger.error(f"ARQ: Customer upsert failed for call={call_run_id}: {e}")
 
 
+async def run_post_call_analysis(ctx, call_run_id: int):
+    """
+    ARQ Background Task:
+    1. Loads CallRun.
+    2. Downloads raw transcript from MinIO/local storage if available.
+    3. Prompts GPT-4o-mini with full transcript to extract:
+       - summary (string)
+       - sentiment (positive/neutral/negative)
+       - disposition (completed/transferred/voicemail/abandoned/no_answer)
+       - key_topics (list of strings)
+       - task_completed (boolean)
+    4. Writes results to CallRun columns.
+    """
+    logger.info(f"ARQ: Running post-call analysis for call_run={call_run_id}")
+    
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(CallRun).where(CallRun.id == call_run_id))
+        run = result.scalar_one_or_none()
+        if not run:
+            logger.error(f"ARQ: CallRun {call_run_id} not found")
+            return
+
+        transcript_text = ""
+        if run.transcript_path:
+            try:
+                path = run.transcript_path
+                if path.startswith(f"{MINIO_BUCKET}/"):
+                    path = path[len(f"{MINIO_BUCKET}/"):]
+                transcript_bytes = download_file_from_minio(MINIO_BUCKET, path)
+                transcript_text = transcript_bytes.decode("utf-8")
+            except Exception as e:
+                logger.error(f"ARQ: Failed to download transcript from {run.transcript_path}: {e}")
+
+        # Defaults
+        summary = "No conversation occurred."
+        sentiment = "neutral"
+        disposition = run.disposition or "no_answer"
+        key_topics = []
+        task_completed = False
+
+        if transcript_text.strip():
+            from openai import AsyncOpenAI
+            from app.core.config import OPENAI_API_KEY
+            if OPENAI_API_KEY and not OPENAI_API_KEY.startswith("mock"):
+                try:
+                    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                    system_prompt = (
+                        "You are an expert post-call analysis bot. Review the conversation transcript between the voice agent and the customer.\n"
+                        "Extract the following fields:\n"
+                        "1. summary: A brief 2-line summary of the call.\n"
+                        "2. sentiment: Must be one of: 'positive', 'neutral', 'negative'.\n"
+                        "3. disposition: Must be one of: 'completed', 'transferred', 'voicemail', 'abandoned', 'no_answer'. Choose the one that best matches the outcome of the conversation.\n"
+                        "4. key_topics: A list of key topics discussed (e.g. ['pricing', 'support']).\n"
+                        "5. task_completed: A boolean indicating whether the primary goal/task of the call was successfully completed.\n\n"
+                        "Return ONLY a raw JSON object with keys: 'summary', 'sentiment', 'disposition', 'key_topics', 'task_completed'. Do not include markdown code block formatting."
+                    )
+                    response = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": f"Transcript:\n{transcript_text}"}
+                        ],
+                        temperature=0.3,
+                        max_tokens=300
+                    )
+                    content = response.choices[0].message.content or "{}"
+                    if content.startswith("```"):
+                        lines = content.splitlines()
+                        if lines[0].startswith("```json"):
+                            content = "\n".join(lines[1:-1])
+                        elif lines[0].startswith("```"):
+                            content = "\n".join(lines[1:-1])
+                    data = json.loads(content)
+                    summary = data.get("summary") or "Conversation occurred."
+                    sentiment = data.get("sentiment") or "neutral"
+                    disposition = data.get("disposition") or disposition
+                    key_topics = data.get("key_topics") or []
+                    task_completed = data.get("task_completed") or False
+                except Exception as e:
+                    logger.error(f"ARQ: LLM post-call analysis failed: {e}")
+                    summary = "Call completed with transcript."
+                    sentiment = "neutral"
+            else:
+                logger.warning("ARQ: OPENAI_API_KEY is not configured or mock key used. Using mock analysis fallback.")
+                summary = "Call completed. Mock analysis generated."
+                sentiment = "positive"
+                disposition = "completed"
+                key_topics = ["general"]
+                task_completed = True
+
+        run.summary = summary
+        run.sentiment = sentiment
+        run.disposition = disposition
+        run.key_topics = key_topics
+        run.task_completed = task_completed
+        db.add(run)
+        await db.commit()
+
+        # Trigger outbound webhook events for call.ended and call.transcript
+        try:
+            from app.services.webhook_dispatcher import dispatch_call_webhook
+            # Run these in background tasks so they do not block the ARQ task worker thread
+            asyncio.create_task(dispatch_call_webhook(
+                db,
+                run.id,
+                "call.ended",
+                payload_extra={
+                    "summary": run.summary,
+                    "sentiment": run.sentiment,
+                    "disposition": run.disposition,
+                    "task_completed": run.task_completed,
+                    "duration_seconds": run.duration_seconds,
+                    "usage_stats": run.usage_stats
+                }
+            ))
+
+            transcript_payload = transcript_text
+            if not transcript_payload and run.gathered_context:
+                transcript_payload = run.gathered_context.get("whatsapp_messages") or run.gathered_context.get("transcript")
+
+            asyncio.create_task(dispatch_call_webhook(
+                db,
+                run.id,
+                "call.transcript",
+                payload_extra={
+                    "transcript": transcript_payload
+                }
+            ))
+        except Exception as ex:
+            logger.error(f"ARQ: Failed to queue webhook event dispatch: {ex}")
+        logger.info(f"ARQ: Successfully saved post-call analysis for call={call_run_id}")
+
+
+async def update_campaign_contact_status(ctx, call_run_id: int, contact_id: int):
+    """
+    ARQ Background Task:
+    1. Loads CampaignContact by contact_id.
+    2. Updates status based on call run's disposition:
+       - If call was completed/transferred, set contact status to "completed"
+       - If call failed or was no_answer/abandoned/voicemail:
+         - If contact.attempts < 3, reset status to "pending" for retry
+         - Otherwise, set status to "failed"
+    """
+    logger.info(f"ARQ: Updating campaign contact={contact_id} status using call_run={call_run_id}")
+    async with AsyncSessionLocal() as db:
+        # Load contact
+        result = await db.execute(select(CampaignContact).where(CampaignContact.id == contact_id))
+        contact = result.scalar_one_or_none()
+        if not contact:
+            logger.error(f"ARQ: CampaignContact {contact_id} not found")
+            return
+
+        # Load call run
+        run_res = await db.execute(select(CallRun).where(CallRun.id == call_run_id))
+        run = run_res.scalar_one_or_none()
+        
+        disposition = run.disposition if run else "failed"
+        
+        # Determine contact status
+        if disposition in ("completed", "transferred"):
+            contact.status = "completed"
+        else:  # voicemail, abandoned, no_answer, failed
+            if contact.attempts < 3:
+                contact.status = "pending"
+            else:
+                contact.status = "failed"
+                
+        db.add(contact)
+        await db.commit()
+        logger.info(f"ARQ: Contact {contact_id} status updated to '{contact.status}' (attempts={contact.attempts})")
+
+
 async def dial_next_contacts(ctx, campaign_id: int):
     """
     ARQ Background Task:
@@ -228,82 +402,88 @@ async def dial_next_contacts(ctx, campaign_id: int):
     logger.info(f"ARQ: Processing dialer queue for campaign={campaign_id}")
     
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Campaign).where(Campaign.id == campaign_id)
-        )
-        campaign = result.scalar_one_or_none()
-        if not campaign or campaign.status != "running":
-            logger.info(f"ARQ: Campaign={campaign_id} is not active (status={campaign.status if campaign else 'none'})")
-            return
+        async with db.begin():
+            result = await db.execute(
+                select(Campaign).where(Campaign.id == campaign_id)
+            )
+            campaign = result.scalar_one_or_none()
+            if not campaign or campaign.status != "running":
+                logger.info(f"ARQ: Campaign={campaign_id} is not active (status={campaign.status if campaign else 'none'})")
+                return
 
-        # Check active concurrent calls for this campaign
-        active_select = (
-            select(CampaignContact)
-            .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "in_progress")
-        )
-        active_result = await db.execute(active_select)
-        active_calls = active_result.scalars().all()
-        
-        MAX_CONCURRENT_CALLS = 5
-        available_slots = MAX_CONCURRENT_CALLS - len(active_calls)
-        
-        if available_slots <= 0:
-            logger.info(f"ARQ: Campaign={campaign_id} is at maximum concurrency ({len(active_calls)}/{MAX_CONCURRENT_CALLS} active). Deferring next check.")
+            # Check active concurrent calls for this campaign
+            active_select = (
+                select(CampaignContact)
+                .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "in_progress")
+            )
+            active_result = await db.execute(active_select)
+            active_calls = active_result.scalars().all()
+            
+            MAX_CONCURRENT_CALLS = 5
+            available_slots = MAX_CONCURRENT_CALLS - len(active_calls)
+            
+            if available_slots <= 0:
+                logger.info(f"ARQ: Campaign={campaign_id} is at maximum concurrency ({len(active_calls)}/{MAX_CONCURRENT_CALLS} active). Deferring next check.")
+                defer_check = True
+                contacts = []
+            else:
+                defer_check = False
+                batch_size = min(3, available_slots)
+
+                # Fetch up to `batch_size` pending contacts with SKIP LOCKED row-level lock
+                contacts_select = (
+                    select(CampaignContact)
+                    .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "pending")
+                    .limit(batch_size)
+                    .with_for_update(skip_locked=True)
+                )
+                contacts_result = await db.execute(contacts_select)
+                contacts = contacts_result.scalars().all()
+
+                if not contacts:
+                    # Check if there are any remaining in-progress contacts
+                    check_running = await db.execute(
+                        select(CampaignContact)
+                        .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "in_progress")
+                    )
+                    if not check_running.scalars().all():
+                        campaign.status = "completed"
+                        logger.info(f"ARQ: Campaign={campaign_id} completed (all numbers dialed)")
+                    return
+
+                # Mark them as in_progress immediately
+                for contact in contacts:
+                    contact.status = "in_progress"
+                    contact.attempts += 1
+                    contact.last_attempt_at = datetime.now(UTC)
+                    db.add(contact)
+
+        if defer_check:
             redis_pool = ctx.get("redis")
             if redis_pool:
                 await redis_pool.enqueue_job("dial_next_contacts", campaign_id, _defer_by=5)
             return
 
-        batch_size = min(3, available_slots)
+        if contacts:
+            # Run dial outs
+            from app.services.dialer_service import dial_number
+            for contact in contacts:
+                success = await dial_number(db, contact.id)
+                if not success:
+                    # If initiation fails, mark it failed immediately
+                    async with AsyncSessionLocal() as session:
+                        contact_result = await session.execute(
+                            select(CampaignContact).where(CampaignContact.id == contact.id)
+                        )
+                        c = contact_result.scalar_one_or_none()
+                        if c:
+                            c.status = "failed"
+                            await session.commit()
 
-        # Fetch up to `batch_size` pending contacts to call in this batch
-        contacts_select = (
-            select(CampaignContact)
-            .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "pending")
-            .limit(batch_size)
-        )
-        contacts_result = await db.execute(contacts_select)
-        contacts = contacts_result.scalars().all()
-
-        if not contacts:
-            # Check if there are any remaining in-progress contacts
-            check_running = await db.execute(
-                select(CampaignContact)
-                .where(CampaignContact.campaign_id == campaign_id, CampaignContact.status == "in_progress")
-            )
-            if not check_running.scalars().all():
-                campaign.status = "completed"
-                await db.commit()
-                logger.info(f"ARQ: Campaign={campaign_id} completed (all numbers dialed)")
-            return
-
-        # Mark them as in_progress immediately to avoid double dialing
-        for contact in contacts:
-            contact.status = "in_progress"
-            contact.attempts += 1
-            contact.last_attempt_at = datetime.now(UTC)
-            db.add(contact)
-        await db.commit()
-
-        # Run dial outs
-        from app.services.dialer_service import dial_number
-        for contact in contacts:
-            success = await dial_number(db, contact.id)
-            if not success:
-                # If initiation fails, mark it failed immediately
-                async with AsyncSessionLocal() as session:
-                    contact_result = await session.execute(
-                        select(CampaignContact).where(CampaignContact.id == contact.id)
-                    )
-                    c = contact_result.scalar_one_or_none()
-                    if c:
-                        c.status = "failed"
-                        await session.commit()
-
-        # Defer next batch loop check in 5 seconds
-        redis_pool = ctx.get("redis")
-        if redis_pool:
-            await redis_pool.enqueue_job("dial_next_contacts", campaign_id, _defer_by=5)
+            # Defer next batch loop check in 5 seconds
+            redis_pool = ctx.get("redis")
+            if redis_pool:
+                await redis_pool.enqueue_job("dial_next_contacts", campaign_id, _defer_by=5)
 
 
 # ── ARQ Settings ─────────────────────────────────────────────────────────────
@@ -323,5 +503,12 @@ except Exception as ex:
     arq_redis_settings = RedisSettings()
 
 class WorkerSettings:
-    functions = [process_call_completion, update_customer_profile, dial_next_contacts]
+    functions = [
+        process_call_completion, 
+        update_customer_profile, 
+        dial_next_contacts,
+        run_post_call_analysis,
+        update_campaign_contact_status
+    ]
     redis_settings = arq_redis_settings
+

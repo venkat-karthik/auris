@@ -31,6 +31,15 @@ from app.dependencies.rate_limit import check_rate_limit
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.config import SENTRY_DSN, ENVIRONMENT
+    if SENTRY_DSN and not SENTRY_DSN.startswith("mock"):
+        import sentry_sdk
+        try:
+            sentry_sdk.init(dsn=SENTRY_DSN, environment=ENVIRONMENT)
+            logger.info(f"Initialized Sentry error tracking for environment: {ENVIRONMENT}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Sentry: {e}")
+
     logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
     yield
     logger.info(f"Shutting down {APP_NAME}")

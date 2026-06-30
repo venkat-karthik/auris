@@ -50,15 +50,42 @@ async def upload_voice_sample(
             detail="Voice sample too short. Please provide clear speech audio."
         )
 
-    # In production, we'd dispatch to elevenlabs client:
-    # client.clone_voice(name, file_content)
-    # For now, we mock the generated ElevenLabs voice ID
-    mock_voice_id = f"voice_id_{uuid.uuid4().hex[:12]}"
+    import httpx
+    from app.core.config import ELEVENLABS_API_KEY
+
+    if ELEVENLABS_API_KEY and not ELEVENLABS_API_KEY.startswith("mock"):
+        try:
+            files = {"files": (file.filename, audio_content, file.content_type)}
+            data = {"name": name}
+            headers = {"xi-api-key": ELEVENLABS_API_KEY}
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    "https://api.elevenlabs.io/v1/voices/add",
+                    headers=headers,
+                    files=files,
+                    data=data
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"ElevenLabs API error: {resp.status_code} - {resp.text}"
+                    )
+                voice_id = resp.json()["voice_id"]
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to communicate with ElevenLabs: {str(e)}"
+            )
+    else:
+        import uuid
+        voice_id = f"voice_id_{uuid.uuid4().hex[:12]}"
 
     voice = ClonedVoice(
         org_id=org.id,
         name=name,
-        voice_id=mock_voice_id,
+        voice_id=voice_id,
         status="ready"
     )
     db.add(voice)

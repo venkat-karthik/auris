@@ -55,11 +55,14 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # ── Telephony ─────────────────────────────────────────────────────────────────
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY", "")
+TELNYX_PUBLIC_KEY = os.getenv("TELNYX_PUBLIC_KEY", "")
 TELNYX_CONNECTION_ID = os.getenv("TELNYX_CONNECTION_ID", "platform-connection-id")
 TELNYX_CALLER_ID = os.getenv("TELNYX_CALLER_ID", "+10000000000")
+
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_CALLER_ID = os.getenv("TWILIO_CALLER_ID", "")
@@ -74,12 +77,21 @@ TURN_HOST = os.getenv("TURN_HOST", "localhost")
 TURN_SECRET = os.getenv("TURN_SECRET", "auris-turn-secret-key-for-local-development-9912")
 TURN_PORT = int(os.getenv("TURN_PORT", "3478"))
 
+# ── Observability ─────────────────────────────────────────────────────────────
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+
+
 # ── SMTP Email Verification ──────────────────────────────────────────────────
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "onboarding@auris.xyz")
+
+# ── WhatsApp ──────────────────────────────────────────────────────────────────
+WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN", "")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "auris_whatsapp_verify_token")
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ORIGINS = [

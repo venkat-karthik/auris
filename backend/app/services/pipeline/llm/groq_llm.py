@@ -22,6 +22,7 @@ class GroqLLM(OpenAILLM):
         system_prompt: str = "You are a helpful voice assistant.",
         temperature: float = 0.7,
         max_tokens: int = 500,
+        initial_message: str | None = None,
     ):
         super().__init__(
             api_key=api_key,
@@ -29,6 +30,7 @@ class GroqLLM(OpenAILLM):
             system_prompt=system_prompt,
             temperature=temperature,
             max_tokens=max_tokens,
+            initial_message=initial_message,
         )
         self.name = "groq-llm"
         # Override OpenAI client with Groq base URL

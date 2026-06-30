@@ -4,7 +4,7 @@ One row per call. Tracks everything about a call from start to finish.
 """
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Boolean
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -55,6 +55,15 @@ class CallRun(Base):
 
     # Call disposition code (set by agent on completion)
     disposition = Column(String, nullable=True)
+
+    # Post-call analysis results
+    summary = Column(String, nullable=True)
+    sentiment = Column(String, nullable=True)
+    key_topics = Column(JSON, nullable=True)
+    task_completed = Column(Boolean, nullable=True)
+
+    # Telephony session identifier (Telnyx call_control_id or Twilio CallSid)
+    telephony_id = Column(String, nullable=True)
 
     # Relationships
     org = relationship("Organization", back_populates="call_runs")

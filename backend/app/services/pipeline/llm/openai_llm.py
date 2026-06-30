@@ -26,6 +26,7 @@ class OpenAILLM(BaseProcessor):
         system_prompt: str = "You are a helpful voice assistant.",
         temperature: float = 0.7,
         max_tokens: int = 500,
+        initial_message: str | None = None,
     ):
         super().__init__("openai-llm")
         self.client = AsyncOpenAI(api_key=api_key)
@@ -33,6 +34,7 @@ class OpenAILLM(BaseProcessor):
         self.system_prompt = system_prompt
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.initial_message = initial_message
         self._messages: list[dict] = []
         self._tools: list[dict] = []
         self._gen_task = None
@@ -49,12 +51,25 @@ class OpenAILLM(BaseProcessor):
             self._messages = [{"role": "system", "content": self.system_prompt}]
             # Inject initial context if provided
             context = frame.data or {}
-            if context:
-                context_str = "\n".join(f"{k}: {v}" for k, v in context.items())
+            context_vars = {k: v for k, v in context.items() if k not in ("run_id", "call_type")}
+            if context_vars:
+                context_str = "\n".join(f"{k}: {v}" for k, v in context_vars.items())
                 self._messages.append({
                     "role": "system",
                     "content": f"Call context:\n{context_str}",
                 })
+            
+            # Check for initial_message greeting
+            initial_msg = self.initial_message
+            if not initial_msg and context.get("call_type") == "outbound":
+                initial_msg = "Hello"
+                
+            if initial_msg:
+                self._messages.append({"role": "user", "content": initial_msg})
+                if self._gen_task and not self._gen_task.done():
+                    self._gen_task.cancel()
+                self._gen_task = asyncio.create_task(self._generate())
+                
             await self.emit(frame)
 
         elif frame.type == FrameType.STT_TRANSCRIPT:
@@ -99,12 +114,30 @@ class OpenAILLM(BaseProcessor):
 
     async def _generate(self) -> None:
         """Call OpenAI and stream the response."""
+        import os
+        has_langfuse = bool(os.getenv("LANGFUSE_PUBLIC_KEY"))
+        trace = None
+        generation = None
+        if has_langfuse:
+            try:
+                from langfuse import Langfuse
+                lf = Langfuse()
+                trace = lf.trace(name="voice-call-turn", metadata={"model": self.model})
+                generation = trace.generation(
+                    name=f"{self.name}-generate",
+                    model=self.model,
+                    input=self._messages,
+                )
+            except Exception as ex:
+                logger.error(f"Langfuse trace init failed: {ex}")
+
         kwargs: dict = {
             "model": self.model,
             "messages": self._messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True}
         }
         if self._tools:
             kwargs["tools"] = self._tools
@@ -112,10 +145,16 @@ class OpenAILLM(BaseProcessor):
 
         full_text = ""
         tool_calls_raw: dict[int, dict] = {}
+        prompt_tokens = 0
+        completion_tokens = 0
 
         try:
             stream = await self.client.chat.completions.create(**kwargs)
             async for chunk in stream:
+                if chunk.usage:
+                    prompt_tokens = chunk.usage.prompt_tokens
+                    completion_tokens = chunk.usage.completion_tokens
+
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta:
                     continue
@@ -145,8 +184,22 @@ class OpenAILLM(BaseProcessor):
 
         except Exception as e:
             logger.error(f"OpenAI LLM error: {e}")
+            if generation:
+                generation.end(status_message=str(e), level="ERROR")
             await self.emit(llm_text_complete("I'm sorry, I had a problem. Please try again."))
             return
+
+        if generation:
+            try:
+                generation.end(
+                    output=full_text or str(tool_calls_raw),
+                    usage={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens
+                    }
+                )
+            except Exception as ex:
+                logger.error(f"Langfuse generation end failed: {ex}")
 
         # Emit tool calls
         tool_call_frames = []
@@ -176,4 +229,9 @@ class OpenAILLM(BaseProcessor):
                 ],
             })
 
-        await self.emit(llm_text_complete(full_text, tool_calls=tool_call_frames))
+        complete_frame = llm_text_complete(full_text, tool_calls=tool_call_frames)
+        complete_frame.metadata["usage"] = {
+            "input_tokens": prompt_tokens,
+            "output_tokens": completion_tokens
+        }
+        await self.emit(complete_frame)

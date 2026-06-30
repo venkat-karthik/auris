@@ -43,3 +43,20 @@ class OrgMember(Base):
 
     org = relationship("Organization", back_populates="members")
     user = relationship("User", back_populates="memberships")
+
+
+class OrgInvite(Base):
+    """Pending organization invitations sent by email."""
+    __tablename__ = "org_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    email = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="member")  # owner | admin | member
+    token = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+
+    org = relationship("Organization")
+

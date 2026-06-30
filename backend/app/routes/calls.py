@@ -40,10 +40,26 @@ class CallRunResponse(BaseModel):
     duration_seconds: float | None
     disposition: str | None
     voicemail: bool | None
+    summary: str | None = None
+    sentiment: str | None = None
+    key_topics: list[str] | None = None
+    task_completed: bool | None = None
+    usage_stats: dict | None = None
+    recording_path: str | None = None
+    transcript_path: str | None = None
     created_at: str
 
     class Config:
         from_attributes = True
+
+
+class CallAnalysisResponse(BaseModel):
+    call_id: int
+    summary: str | None
+    sentiment: str | None
+    key_topics: list[str] | None
+    task_completed: bool | None
+    disposition: str | None
 
 class WarmTransferRequest(BaseModel):
     target_agent_id: int
@@ -55,15 +71,33 @@ async def list_calls(
     db: AsyncSession = Depends(get_db),
     limit: int = 50,
     offset: int = 0,
+    agent_id: Optional[int] = None,
+    status: Optional[str] = None,
+    call_type: Optional[str] = None,
+    disposition: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ):
-    result = await db.execute(
-        select(CallRun)
-        .where(CallRun.org_id == org.id)
-        .order_by(CallRun.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    query = select(CallRun).where(CallRun.org_id == org.id)
+    
+    # Dynamic filtering
+    if agent_id is not None:
+        query = query.where(CallRun.agent_id == agent_id)
+    if status is not None:
+        query = query.where(CallRun.status == status)
+    if call_type is not None:
+        query = query.where(CallRun.call_type == call_type)
+    if disposition is not None:
+        query = query.where(CallRun.disposition == disposition)
+    if start_date is not None:
+        query = query.where(CallRun.created_at >= start_date)
+    if end_date is not None:
+        query = query.where(CallRun.created_at <= end_date)
+
+    query = query.order_by(CallRun.created_at.desc()).limit(limit).offset(offset)
+    result = await db.execute(query)
     runs = result.scalars().all()
+    
     return [
         CallRunResponse(
             id=r.id,
@@ -76,7 +110,14 @@ async def list_calls(
             duration_seconds=r.duration_seconds,
             disposition=r.disposition,
             voicemail=(r.voicemail == "true") if r.voicemail is not None else None,
-            created_at=r.created_at.isoformat(),
+            summary=r.summary,
+            sentiment=r.sentiment,
+            key_topics=r.key_topics,
+            task_completed=r.task_completed,
+            usage_stats=r.usage_stats,
+            recording_path=r.recording_path,
+            transcript_path=r.transcript_path,
+            created_at=r.created_at.isoformat() if r.created_at else None,
         )
         for r in runs
     ]
@@ -105,8 +146,54 @@ async def get_call(
         duration_seconds=run.duration_seconds,
         disposition=run.disposition,
         voicemail=(run.voicemail == "true") if run.voicemail is not None else None,
-        created_at=run.created_at.isoformat(),
+        summary=run.summary,
+        sentiment=run.sentiment,
+        key_topics=run.key_topics,
+        task_completed=run.task_completed,
+        usage_stats=run.usage_stats,
+        recording_path=run.recording_path,
+        transcript_path=run.transcript_path,
+        created_at=run.created_at.isoformat() if run.created_at else None,
     )
+
+
+@router.get("/{call_id}/analysis", response_model=CallAnalysisResponse)
+async def get_call_analysis(
+    call_id: int,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve only the structured post-call analysis fields for a call run."""
+    result = await db.execute(
+        select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return CallAnalysisResponse(
+        call_id=run.id,
+        summary=run.summary,
+        sentiment=run.sentiment,
+        key_topics=run.key_topics,
+        task_completed=run.task_completed,
+        disposition=run.disposition,
+    )
+
+
+@router.get("/turn-credentials")
+async def get_turn_credentials(user = Depends(get_current_user)):
+    # Generate HMAC-based time-limited TURN credentials
+    import hmac, hashlib, time, base64
+    from app.core.config import TURN_SECRET, TURN_HOST, TURN_PORT
+    username = f"{int(time.time()) + 3600}:{user.id}"
+    password = base64.b64encode(
+        hmac.new(TURN_SECRET.encode(), username.encode(), hashlib.sha256).digest()
+    ).decode()
+    return {
+        "urls": [f"turn:{TURN_HOST}:{TURN_PORT}"],
+        "username": username,
+        "credential": password
+    }
 
 
 @router.websocket("/ws/{agent_id}")
@@ -185,6 +272,10 @@ async def websocket_call(
         await db.refresh(run)
         run_id = run.id
 
+        # Trigger call.started webhook event
+        from app.services.webhook_dispatcher import dispatch_call_webhook
+        asyncio.create_task(dispatch_call_webhook(db, run_id, "call.started"))
+
         from app.services.monitor_tracker import MonitorTracker
         MonitorTracker.register_call(
             run_id=run_id,
@@ -198,20 +289,33 @@ async def websocket_call(
 
     logger.info(f"WebRTC call started: agent={agent_id} run={run_id}")
 
-    # Build the pipeline
     # Extract system prompt from agent graph (first node or top-level prompt)
     has_visual_nodes = len(agent.graph.get("nodes", [])) > 0
     workflow_state = None
     if has_visual_nodes:
         from app.services.pipeline.workflow_engine import WorkflowState
         workflow_state = WorkflowState(agent.graph, context_variables=agent.context_variables)
-        system_prompt, should_end = await workflow_state.execute_active_node()
+        system_prompt, should_end = await workflow_state.execute_active_node(db=db, run_id=run_id)
         if should_end:
             await websocket.send_json({"type": "end"})
             await websocket.close()
             return
     else:
         system_prompt = _extract_system_prompt(agent.graph)
+        
+        # A/B variant traffic splitting
+        variants = agent.model_config.get("variants", [])
+        if variants:
+            import random
+            total_weight = sum(v.get("traffic_weight", 0.0) for v in variants)
+            if total_weight > 0:
+                r = random.uniform(0, total_weight)
+                curr_w = 0.0
+                for v in variants:
+                    curr_w += v.get("traffic_weight", 0.0)
+                    if r <= curr_w:
+                        system_prompt = v.get("system_prompt", system_prompt)
+                        break
 
     if customer_context:
         system_prompt += customer_context
@@ -226,7 +330,7 @@ async def websocket_call(
     # Find LLM processor and register tools
     llm_processor = None
     for p in pipeline.processors:
-        if p.name in ("openai-llm", "groq-llm"):
+        if p.name in ("openai-llm", "groq-llm", "anthropic-llm"):
             llm_processor = p
             break
 
@@ -284,16 +388,62 @@ async def websocket_call(
             }
         })
 
-    if llm_processor and tools:
+    # Register transfer_to_agent tool
+    tools.append({
+        "type": "function",
+        "function": {
+            "name": "transfer_to_agent",
+            "description": "Transfer the call to another specialized virtual agent (e.g. support, billing, sales).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_agent_id": {"type": "integer", "description": "The ID of the target agent to transfer to."}
+                },
+                "required": ["target_agent_id"]
+            }
+        }
+    })
+
+    # Register custom tools from agent configuration
+    custom_tools = agent.model_config.get("tools", [])
+    if custom_tools:
+        tools.extend(custom_tools)
+
+    if llm_processor:
         llm_processor.set_tools(tools)
 
     from app.services.pipeline.frame import FrameType, Frame
     transcript_segments = []
+    recorded_audio_chunks = []
+    import time
+    
+    # Latency tracking variables
+    turn_timers = {
+        "user_silent_at": None,
+        "stt_done_at": None,
+        "llm_start_at": None,
+        "llm_done_at": None,
+        "tts_start_at": None
+    }
+    usage_stats = {
+        "llm_input_tokens": 0,
+        "llm_output_tokens": 0,
+        "stt_duration_ms": 0.0,
+        "tts_duration_ms": 0.0,
+        "latencies": []
+    }
 
     async def collecting_wrapper():
         frame = await pipeline.collect()
         if frame:
-            if frame.type == FrameType.STT_TRANSCRIPT:
+            # Latency and usage accumulation
+            if frame.type == FrameType.USER_SILENT:
+                turn_timers["user_silent_at"] = time.time()
+                
+            elif frame.type == FrameType.STT_TRANSCRIPT:
+                dur = frame.metadata.get("duration_ms", 0.0)
+                usage_stats["stt_duration_ms"] += dur
+                
                 data = frame.data or {}
                 if data.get("is_final"):
                     text = data.get("text", "").strip()
@@ -301,13 +451,51 @@ async def websocket_call(
                         transcript_segments.append(f"User: {text}")
                         from app.services.monitor_tracker import MonitorTracker
                         MonitorTracker.update_transcript(run_id, text, "user")
+                        
+                        now = time.time()
+                        turn_timers["stt_done_at"] = now
+                        if turn_timers["user_silent_at"]:
+                            stt_latency = (now - turn_timers["user_silent_at"]) * 1000.0
+                            usage_stats["latencies"].append({"event": "stt", "ms": stt_latency})
+                            
+            elif frame.type == FrameType.LLM_TEXT:
+                if not turn_timers["llm_start_at"]:
+                    now = time.time()
+                    turn_timers["llm_start_at"] = now
+                    if turn_timers["stt_done_at"]:
+                        llm_ttfb = (now - turn_timers["stt_done_at"]) * 1000.0
+                        usage_stats["latencies"].append({"event": "llm_ttfb", "ms": llm_ttfb})
+                        
             elif frame.type == FrameType.LLM_TEXT_COMPLETE:
+                turn_timers["llm_done_at"] = time.time()
+                
+                usage = frame.metadata.get("usage", {})
+                usage_stats["llm_input_tokens"] += usage.get("input_tokens", 0)
+                usage_stats["llm_output_tokens"] += usage.get("output_tokens", 0)
+                
                 data = frame.data or {}
                 text = data.get("text", "").strip()
                 if text:
                     transcript_segments.append(f"Agent: {text}")
                     from app.services.monitor_tracker import MonitorTracker
                     MonitorTracker.update_transcript(run_id, text, "agent")
+                    
+            elif frame.type == FrameType.AUDIO_OUT:
+                recorded_audio_chunks.append(frame.data)
+                
+                dur = frame.metadata.get("duration_ms", 0.0)
+                usage_stats["tts_duration_ms"] += dur
+                
+                if turn_timers["llm_done_at"] and not turn_timers["tts_start_at"]:
+                    now = time.time()
+                    turn_timers["tts_start_at"] = now
+                    tts_latency = (now - turn_timers["llm_done_at"]) * 1000.0
+                    usage_stats["latencies"].append({"event": "tts", "ms": tts_latency})
+                    
+                    # Reset timers for next turn
+                    for k in turn_timers:
+                        turn_timers[k] = None
+
             elif frame.type == FrameType.TOOL_CALL:
                 # Intercept tool calls, execute them, and push back TOOL_RESULT
                 data = frame.data or {}
@@ -329,7 +517,9 @@ async def websocket_call(
                         workflow_state.context[var_name] = val
                     next_node = workflow_state.transition_to_next()
                     if next_node:
-                        new_prompt, should_end = await workflow_state.execute_active_node()
+                        from app.services.pipeline.frame import Frame
+                        async with AsyncSessionLocal() as session:
+                            new_prompt, should_end = await workflow_state.execute_active_node(db=session, run_id=run_id)
                         if should_end:
                             await pipeline.push(Frame(type=FrameType.CALL_END))
                             result = {"status": "call_ended"}
@@ -343,9 +533,55 @@ async def websocket_call(
                             result = {"status": "success", "next_node": next_node.get("id")}
                     else:
                         result = {"status": "success", "next_node": None}
+                elif name == "transfer_to_agent":
+                    target_agent_id = args.get("target_agent_id")
+                    async with AsyncSessionLocal() as session:
+                        res = await session.execute(select(Agent).where(Agent.id == target_agent_id, Agent.org_id == agent.org_id))
+                        target_agent = res.scalar_one_or_none()
+                        if target_agent:
+                            cr_res = await session.execute(select(CallRun).where(CallRun.id == run_id))
+                            cr_rec = cr_res.scalar_one_or_none()
+                            if cr_rec:
+                                cr_rec.agent_id = target_agent.id
+                                await session.commit()
+                            
+                            from app.routes.calls import _extract_system_prompt
+                            new_prompt = _extract_system_prompt(target_agent.graph)
+                            if llm_processor:
+                                llm_processor.system_prompt = new_prompt
+                                llm_processor._messages.append({
+                                    "role": "system",
+                                    "content": f"[SYSTEM NOTICE: Call transferred to {target_agent.name}. System prompt updated to:\n{new_prompt}]"
+                                })
+                            result = {"status": "success", "message": f"Transferred to agent {target_agent.name}"}
+                        else:
+                            result = {"status": "failed", "error": "Agent not found"}
                 elif name == "end_call":
                     await pipeline.push(Frame(type=FrameType.CALL_END))
                     result = {"status": "call_ended"}
+
+                if result is None:
+                    # General-purpose server_url webhook for arbitrary tool calls
+                    server_url = agent.model_config.get("server_url")
+                    if server_url:
+                        import httpx
+                        transcript_so_far = "\n".join(transcript_segments)
+                        try:
+                            async with httpx.AsyncClient() as client:
+                                payload = {
+                                    "tool_name": name,
+                                    "arguments": args,
+                                    "call_id": run_id,
+                                    "transcript_so_far": transcript_so_far
+                                }
+                                resp = await client.post(server_url, json=payload, timeout=5.0)
+                                if resp.status_code >= 200 and resp.status_code < 300:
+                                    result = resp.json()
+                                else:
+                                    result = {"error": f"Server returned status {resp.status_code}"}
+                        except Exception as e:
+                            logger.error(f"Failed to call server_url tool {name}: {e}")
+                            result = {"error": str(e)}
 
                 if result is not None:
                     await pipeline.push(Frame(type=FrameType.TOOL_RESULT, data={"call_id": call_id, "result": result}))
@@ -367,6 +603,8 @@ async def websocket_call(
 
     try:
         await pipeline.start()
+        # Push CALL_START to start the conversation pipeline
+        await pipeline.push(Frame(type=FrameType.CALL_START, data={"run_id": run_id, "call_type": "inbound"}))
         await transport.run()
     except WebSocketDisconnect:
         logger.info(f"WebRTC call disconnected: run={run_id}")
@@ -404,6 +642,23 @@ async def websocket_call(
                     except Exception as e:
                         logger.error(f"Failed to upload transcript to MinIO: {e}")
                 
+                # Save WAV recording
+                if recorded_audio_chunks:
+                    try:
+                        from app.routes.calls import pcm_to_wav
+                        from app.tasks.worker import upload_file_to_minio
+                        from app.core.config import MINIO_BUCKET
+                        
+                        pcm_data = b"".join(recorded_audio_chunks)
+                        wav_data = pcm_to_wav(pcm_data)
+                        rec_filename = f"recordings/{run_id}.wav"
+                        rec_path = upload_file_to_minio(MINIO_BUCKET, rec_filename, wav_data, "audio/wav")
+                        run.recording_path = rec_path
+                    except Exception as e:
+                        logger.error(f"Failed to upload recording to MinIO: {e}")
+                
+                # Save usage stats
+                run.usage_stats = usage_stats
                 await db.commit()
         
         await charge_final_credits(run_id, agent.org_id, duration, agent.model_config)
@@ -418,6 +673,7 @@ async def websocket_call(
                 arq_pool = await create_pool(redis_settings)
                 await arq_pool.enqueue_job("process_call_completion", run_id)
                 await arq_pool.enqueue_job("update_customer_profile", run_id)
+                await arq_pool.enqueue_job("run_post_call_analysis", run_id)
                 await arq_pool.close()
             
             asyncio.create_task(trigger_tasks())

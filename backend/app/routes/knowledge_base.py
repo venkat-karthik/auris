@@ -43,10 +43,10 @@ async def upload_document(
     Ingestion (chunking and embedding) is triggered as a background task.
     """
     file_name = file.filename
-    if not file_name or not (file_name.endswith(".txt") or file_name.endswith(".pdf")):
+    if not file_name or not (file_name.endswith(".txt") or file_name.endswith(".pdf") or file_name.endswith(".docx")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file format. Only .txt and .pdf files are supported."
+            detail="Unsupported file format. Only .txt, .pdf, and .docx files are supported."
         )
 
     file_data = await file.read()

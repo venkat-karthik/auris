@@ -154,13 +154,4 @@ async def get_call_outcome_analytics(
             continue
         outcomes_dict[label] = outcomes_dict.get(label, 0) + count
 
-    # If no data exists, provide a mock outcome list for user previewing
-    if not outcomes_dict:
-        return [
-            CallOutcome(outcome="Answered", count=15),
-            CallOutcome(outcome="Voicemail", count=4),
-            CallOutcome(outcome="Abandoned", count=2),
-            CallOutcome(outcome="Busy", count=1),
-        ]
-
     return [CallOutcome(outcome=k, count=v) for k, v in outcomes_dict.items()]

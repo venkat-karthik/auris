@@ -1,6 +1,7 @@
 import httpx
 from loguru import logger
 from typing import Any
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class WorkflowGraphEngine:
@@ -30,7 +31,7 @@ class WorkflowGraphEngine:
             return False, "Graph cannot have multiple 'startCall' entry nodes"
 
         # 2. Node types validation
-        valid_types = {"startCall", "agent", "webhook", "qa", "tuner", "endCall"}
+        valid_types = {"startCall", "agent", "webhook", "qa", "tuner", "endCall", "transferCall"}
         for node in nodes:
             ntype = node.get("type")
             if ntype and ntype not in valid_types:
@@ -116,7 +117,12 @@ class WorkflowState:
         logger.info(f"Workflow reached terminal state from node: {self.active_node_id}")
         return None
 
-    async def execute_active_node(self, client: httpx.AsyncClient | None = None) -> tuple[str, bool]:
+    async def execute_active_node(
+        self,
+        client: httpx.AsyncClient | None = None,
+        db: AsyncSession | None = None,
+        run_id: int | None = None
+    ) -> tuple[str, bool]:
         """
         Executes active node logic:
         - For webhooks: runs external REST call, updates context variables, transitions to next.
@@ -133,11 +139,33 @@ class WorkflowState:
             # Just transition to next
             next_node = self.transition_to_next()
             if next_node:
-                return await self.execute_active_node(client)
+                return await self.execute_active_node(client, db, run_id)
             return "", False
 
         elif ntype == "endCall":
             return "", True
+
+        elif ntype == "transferCall":
+            target_agent_id = ndata.get("target_agent_id")
+            if target_agent_id and db and run_id:
+                from app.models.agent import Agent
+                from app.models.call_run import CallRun
+                from sqlalchemy import select
+                agent_res = await db.execute(select(Agent).where(Agent.id == target_agent_id))
+                target_agent = agent_res.scalar_one_or_none()
+                if target_agent:
+                    run_res = await db.execute(select(CallRun).where(CallRun.id == run_id))
+                    run_rec = run_res.scalar_one_or_none()
+                    if run_rec:
+                        run_rec.agent_id = target_agent.id
+                        await db.commit()
+                    
+                    self.graph = target_agent.graph
+                    self.nodes = {n["id"]: n for n in self.graph.get("nodes", [])}
+                    self.edges = self.graph.get("edges", [])
+                    self.active_node_id = self._find_start_node()
+                    return await self.execute_active_node(client, db, run_id)
+            return "", False
 
         elif ntype == "webhook":
             url = ndata.get("url")
@@ -176,7 +204,7 @@ class WorkflowState:
                 self.transition_to_next(handle="fail")
 
             # Re-execute the transitioned node
-            return await self.execute_active_node(client)
+            return await self.execute_active_node(client, db, run_id)
 
         elif ntype == "qa":
             question = ndata.get("question", "")
@@ -193,7 +221,7 @@ class WorkflowState:
             props = ndata.get("properties", {})
             self.context.update(props)
             self.transition_to_next()
-            return await self.execute_active_node(client)
+            return await self.execute_active_node(client, db, run_id)
 
         # Standard agent node
         prompt = ndata.get("system_prompt", "")

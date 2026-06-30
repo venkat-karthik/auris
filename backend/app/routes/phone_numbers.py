@@ -80,8 +80,30 @@ async def search_available_numbers(
 ):
     """
     Search available virtual numbers to purchase.
-    Queries Telnyx API if configured; otherwise falls back to local mock data.
+    Queries Twilio or Telnyx API if configured; otherwise falls back to local mock data.
     """
+    # 1. Try Twilio search if configured
+    if config.TWILIO_ACCOUNT_SID and not config.TWILIO_ACCOUNT_SID.startswith("mock"):
+        try:
+            from twilio.rest import Client
+            client = Client(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
+            available_list = client.available_phone_numbers('US').local.list(
+                area_code=area_code,
+                limit=5
+            )
+            results = []
+            for record in available_list:
+                results.append(SearchNumbersResponse(
+                    phone_number=record.phone_number,
+                    region=f"{record.locality or 'US'}, {record.rate_center or 'US'}",
+                    monthly_cost_usd=2.00
+                ))
+            if results:
+                return results
+        except Exception as e:
+            logger.error(f"Error calling Twilio search numbers API: {e}")
+
+    # 2. Try Telnyx search
     if config.TELNYX_API_KEY and not config.TELNYX_API_KEY.startswith("mock"):
         try:
             params = {}
@@ -118,7 +140,7 @@ async def search_available_numbers(
         except Exception as e:
             logger.error(f"Error calling Telnyx search numbers API: {e}")
 
-    # Fallback/Mock behavior for development
+    # 3. Fallback/Mock behavior for development
     prefix = area_code if area_code and len(area_code) == 3 else "830"
     mock_numbers = []
     
@@ -157,10 +179,27 @@ async def buy_phone_number(
     if taken_res.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="This phone number is already leased in the system")
 
-    # 3. Provision the number on Telnyx if API key is present, otherwise fall back to mock
-    telnyx_id = f"tx_num_{random.randint(100000, 999999)}"
+    # 3. Provision the number on Twilio or Telnyx if API keys are present, otherwise fall back to mock
+    provider_id = None
     
-    if config.TELNYX_API_KEY and not config.TELNYX_API_KEY.startswith("mock"):
+    if config.TWILIO_ACCOUNT_SID and not config.TWILIO_ACCOUNT_SID.startswith("mock"):
+        try:
+            from twilio.rest import Client
+            client = Client(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
+            incoming = client.incoming_phone_numbers.create(
+                phone_number=body.phone_number
+            )
+            provider_id = incoming.sid
+            logger.info(f"Successfully ordered number {body.phone_number} via Twilio. SID: {provider_id}")
+        except Exception as e:
+            logger.error(f"Twilio number buy failed: {e}")
+            if not config.TELNYX_API_KEY or config.TELNYX_API_KEY.startswith("mock"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Twilio Number Purchase failed: {str(e)}"
+                )
+
+    if not provider_id and config.TELNYX_API_KEY and not config.TELNYX_API_KEY.startswith("mock"):
         try:
             order_payload = {
                 "phone_numbers": [
@@ -181,8 +220,8 @@ async def buy_phone_number(
                 )
                 if res.status_code in (200, 201):
                     data = res.json().get("data", {})
-                    telnyx_id = data.get("id", telnyx_id)
-                    logger.info(f"Successfully ordered number {body.phone_number} via Telnyx. Order ID: {telnyx_id}")
+                    provider_id = data.get("id")
+                    logger.info(f"Successfully ordered number {body.phone_number} via Telnyx. Order ID: {provider_id}")
                 else:
                     logger.error(f"Telnyx number buy failed: {res.status_code} - {res.text}")
                     raise HTTPException(
@@ -198,6 +237,9 @@ async def buy_phone_number(
                 detail=f"Failed to order phone number from Telnyx: {str(e)}"
             )
 
+    if not provider_id:
+        provider_id = f"mock_num_{random.randint(100000, 999999)}"
+
     # Deduct credits
     org.balance_credits -= cost_credits
 
@@ -206,7 +248,7 @@ async def buy_phone_number(
         org_id=org.id,
         phone_number=body.phone_number,
         label=body.label or "Main Reception Line",
-        telnyx_id=telnyx_id,
+        telnyx_id=provider_id,
         is_active=True
     )
     db.add(num)
@@ -273,6 +315,28 @@ async def release_phone_number(
     num = num_res.scalar_one_or_none()
     if not num:
         raise HTTPException(status_code=404, detail="Phone number not found")
+
+    # Release from Twilio if it's a Twilio SID (starts with PN)
+    if num.telnyx_id and num.telnyx_id.startswith("PN") and config.TWILIO_ACCOUNT_SID and not config.TWILIO_ACCOUNT_SID.startswith("mock"):
+        try:
+            from twilio.rest import Client
+            client = Client(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
+            client.incoming_phone_numbers(num.telnyx_id).delete()
+            logger.info(f"Released Twilio number: {num.phone_number}")
+        except Exception as e:
+            logger.error(f"Failed to release Twilio number {num.phone_number}: {e}")
+
+    # Release from Telnyx if configured (non-mock)
+    elif num.telnyx_id and not num.telnyx_id.startswith("mock") and config.TELNYX_API_KEY and not config.TELNYX_API_KEY.startswith("mock"):
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.delete(
+                    f"https://api.telnyx.com/v2/phone_numbers/{num.telnyx_id}",
+                    headers={"Authorization": f"Bearer {config.TELNYX_API_KEY}"}
+                )
+                logger.info(f"Released Telnyx number: {num.phone_number}")
+        except Exception as e:
+            logger.error(f"Failed to release Telnyx number {num.phone_number}: {e}")
 
     await db.delete(num)
     await db.commit()
