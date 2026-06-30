@@ -363,12 +363,35 @@ async def telnyx_ws(
 @router.post("/telephony/inbound/telnyx")
 async def inbound_telnyx(
     call_control_id: str = Query(...),
-    org_id: int = Query(...),
-    agent_id: int = Query(...),
+    org_id: int | None = Query(None),
+    agent_id: int | None = Query(None),
     from_number: str | None = Query(None, alias="from"),
     to_number: str | None = Query(None, alias="to"),
     call_type: str = Query("inbound"),
+    db: AsyncSession = Depends(get_db),
 ):
+    if (org_id is None or agent_id is None) and to_number:
+        from app.models.phone_number import PhoneNumber
+        clean_num = to_number
+        if not clean_num.startswith("+") and len(clean_num) > 8:
+            clean_num = "+" + clean_num
+        
+        num_query = select(PhoneNumber).where(
+            (PhoneNumber.phone_number == to_number) | 
+            (PhoneNumber.phone_number == clean_num)
+        )
+        res = await db.execute(num_query)
+        db_num = res.scalar_one_or_none()
+        if db_num:
+            org_id = db_num.org_id
+            agent_id = db_num.agent_id
+            logger.info(f"Dynamically routed inbound Telnyx call on {to_number} to org {org_id}, agent {agent_id}")
+        else:
+            logger.warning(f"Inbound Telnyx call to unmapped number {to_number}")
+
+    if org_id is None or agent_id is None:
+        raise HTTPException(status_code=404, detail="Phone number mapping not found or incomplete")
+
     from app.core.config import BACKEND_URL
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
     ws_url = f"{ws_base}/api/v1/telephony/ws/telnyx?call_control_id={quote(call_control_id)}&org_id={org_id}&agent_id={agent_id}&call_type={quote(call_type)}"
@@ -383,11 +406,34 @@ async def inbound_telnyx(
 
 @router.post("/telephony/inbound/twilio")
 async def inbound_twilio(
-    org_id: int = Query(...),
-    agent_id: int = Query(...),
+    org_id: int | None = Query(None),
+    agent_id: int | None = Query(None),
     From: str | None = Query(None),
     To: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
 ):
+    if (org_id is None or agent_id is None) and To:
+        from app.models.phone_number import PhoneNumber
+        clean_num = To
+        if not clean_num.startswith("+") and len(clean_num) > 8:
+            clean_num = "+" + clean_num
+
+        num_query = select(PhoneNumber).where(
+            (PhoneNumber.phone_number == To) | 
+            (PhoneNumber.phone_number == clean_num)
+        )
+        res = await db.execute(num_query)
+        db_num = res.scalar_one_or_none()
+        if db_num:
+            org_id = db_num.org_id
+            agent_id = db_num.agent_id
+            logger.info(f"Dynamically routed inbound Twilio call on {To} to org {org_id}, agent {agent_id}")
+        else:
+            logger.warning(f"Inbound Twilio call to unmapped number {To}")
+
+    if org_id is None or agent_id is None:
+        raise HTTPException(status_code=404, detail="Phone number mapping not found or incomplete")
+
     from app.core.config import BACKEND_URL
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
     ws_url = f"{ws_base}/api/v1/telephony/ws/twilio?org_id={org_id}&agent_id={agent_id}"
@@ -403,6 +449,7 @@ async def inbound_twilio(
     </Connect>
 </Response>"""
     return Response(content=twiml, media_type="application/xml")
+
 
 
 @router.websocket("/telephony/ws/twilio")

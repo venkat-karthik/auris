@@ -1,11 +1,14 @@
 import random
+import httpx
 from typing import List, Optional
 from datetime import datetime, UTC
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
+from app.core import config
 from app.core.database import get_db
 from app.dependencies.auth import get_current_org
 from app.models.organization import Organization
@@ -77,9 +80,45 @@ async def search_available_numbers(
 ):
     """
     Search available virtual numbers to purchase.
-    Simulates lookup from Telnyx with developer mockup fallback.
+    Queries Telnyx API if configured; otherwise falls back to local mock data.
     """
-    # Create beautiful dummy list of available numbers in local sandbox
+    if config.TELNYX_API_KEY and not config.TELNYX_API_KEY.startswith("mock"):
+        try:
+            params = {}
+            if area_code:
+                params["filter[national_destination_code]"] = area_code
+            else:
+                params["filter[national_destination_code]"] = "830"
+            params["filter[country_code]"] = "US"  # Default to US virtual numbers for search
+            params["page[size]"] = 5
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                res = await client.get(
+                    "https://api.telnyx.com/v2/available_phone_numbers",
+                    headers={"Authorization": f"Bearer {config.TELNYX_API_KEY}"},
+                    params=params
+                )
+                if res.status_code == 200:
+                    data = res.json().get("data", [])
+                    results = []
+                    for item in data:
+                        phone_number = item.get("phone_number")
+                        region_info = item.get("region_information", {})
+                        locality = region_info.get("locality", "Texas")
+                        state = region_info.get("state_province", "US")
+                        results.append(SearchNumbersResponse(
+                            phone_number=phone_number,
+                            region=f"{locality}, {state}",
+                            monthly_cost_usd=2.00
+                        ))
+                    if results:
+                        return results
+                else:
+                    logger.error(f"Telnyx numbers search failed: {res.status_code} - {res.text}")
+        except Exception as e:
+            logger.error(f"Error calling Telnyx search numbers API: {e}")
+
+    # Fallback/Mock behavior for development
     prefix = area_code if area_code and len(area_code) == 3 else "830"
     mock_numbers = []
     
@@ -118,6 +157,47 @@ async def buy_phone_number(
     if taken_res.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="This phone number is already leased in the system")
 
+    # 3. Provision the number on Telnyx if API key is present, otherwise fall back to mock
+    telnyx_id = f"tx_num_{random.randint(100000, 999999)}"
+    
+    if config.TELNYX_API_KEY and not config.TELNYX_API_KEY.startswith("mock"):
+        try:
+            order_payload = {
+                "phone_numbers": [
+                    {"phone_number": body.phone_number}
+                ]
+            }
+            if config.TELNYX_CONNECTION_ID:
+                order_payload["connection_id"] = config.TELNYX_CONNECTION_ID
+
+            async with httpx.AsyncClient(timeout=15) as client:
+                res = await client.post(
+                    "https://api.telnyx.com/v2/number_orders",
+                    headers={
+                        "Authorization": f"Bearer {config.TELNYX_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json=order_payload
+                )
+                if res.status_code in (200, 201):
+                    data = res.json().get("data", {})
+                    telnyx_id = data.get("id", telnyx_id)
+                    logger.info(f"Successfully ordered number {body.phone_number} via Telnyx. Order ID: {telnyx_id}")
+                else:
+                    logger.error(f"Telnyx number buy failed: {res.status_code} - {res.text}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Telnyx Number Order failed: {res.text}"
+                    )
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            logger.error(f"Error calling Telnyx number order API: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to order phone number from Telnyx: {str(e)}"
+            )
+
     # Deduct credits
     org.balance_credits -= cost_credits
 
@@ -126,7 +206,7 @@ async def buy_phone_number(
         org_id=org.id,
         phone_number=body.phone_number,
         label=body.label or "Main Reception Line",
-        telnyx_id=f"tx_num_{random.randint(100000, 999999)}",
+        telnyx_id=telnyx_id,
         is_active=True
     )
     db.add(num)

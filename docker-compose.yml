@@ -91,6 +91,17 @@ services:
     ports:
       - "3478:3478"
       - "3478:3478/udp"
+    env_file:
+      - ./backend/.env
+    command:
+      - turnserver
+      - -n
+      - --log-file=stdout
+      - --static-auth-secret=auris-turn-secret-key-for-local-development-9912
+      - --realm=auris.xyz
+      - --fingerprint
+      - --lt-cred-mech
+
 
 volumes:
   postgres_data:

@@ -3,10 +3,11 @@ Auris - Auth routes: signup, login, me
 """
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 from app.core.database import get_db
 from app.core.security import create_access_token, hash_password, verify_password
@@ -58,7 +59,11 @@ class VerifyRequest(BaseModel):
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=201)
-async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
+async def signup(
+    body: SignupRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
     # Check email not taken
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none():
@@ -66,7 +71,6 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
 
     import random
     import string
-    from loguru import logger
 
     code = "".join(random.choices(string.digits, k=6))
 
@@ -105,8 +109,9 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     user.selected_org_id = org.id
     await db.commit()
 
-    # Log to console so developer can verify locally
-    logger.info(f"✉️ [VERIFICATION EMAIL] Code for {user.email}: {code}")
+    # Queue verification email delivery
+    from app.services.email_service import send_verification_email
+    background_tasks.add_task(send_verification_email, user.email, code)
 
     return SignupResponse(
         user_id=user.id,
@@ -115,6 +120,7 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
         is_verified=False,
         message="Verification email sent."
     )
+
 
 
 @router.post("/verify", response_model=TokenResponse)

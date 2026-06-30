@@ -71,8 +71,15 @@ RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 
 # ── TURN / WebRTC ─────────────────────────────────────────────────────────────
 TURN_HOST = os.getenv("TURN_HOST", "localhost")
-TURN_SECRET = os.getenv("TURN_SECRET", "")
+TURN_SECRET = os.getenv("TURN_SECRET", "auris-turn-secret-key-for-local-development-9912")
 TURN_PORT = int(os.getenv("TURN_PORT", "3478"))
+
+# ── SMTP Email Verification ──────────────────────────────────────────────────
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "onboarding@auris.xyz")
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ORIGINS = [
@@ -80,3 +87,4 @@ CORS_ORIGINS = [
     for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
     if o.strip()
 ]
+
