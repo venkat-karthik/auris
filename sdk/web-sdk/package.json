@@ -1,0 +1,43 @@
+{
+  "name": "@auris/web-sdk",
+  "version": "1.0.0",
+  "description": "Official Web SDK and drop-in embed widget for Auris Voice AI Platform.",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./src/index.js"
+    },
+    "./widget": {
+      "import": "./src/widget.js",
+      "require": "./src/widget.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/auris-ai/auris.git",
+    "directory": "sdk/web-sdk"
+  },
+  "keywords": [
+    "auris",
+    "voice-ai",
+    "webrtc",
+    "websocket",
+    "audio-streaming",
+    "embed-widget",
+    "virtual-agent"
+  ],
+  "author": "Auris Voice AI",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
