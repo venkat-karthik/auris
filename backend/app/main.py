@@ -27,6 +27,7 @@ from app.routes.integrations import router as integrations_router
 from app.routes.cloned_voices import router as cloned_voices_router
 from app.routes.reseller import router as reseller_router
 from app.routes.mcp import router as mcp_router
+from app.routes.retell_compat import router as retell_compat_router
 from app.dependencies.rate_limit import check_rate_limit
 
 
@@ -83,6 +84,8 @@ app.include_router(integrations_router, prefix=API_PREFIX, dependencies=[Depends
 app.include_router(cloned_voices_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(reseller_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(mcp_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(retell_compat_router, prefix=f"{API_PREFIX}/retell", dependencies=[Depends(check_rate_limit)])
+app.include_router(retell_compat_router, prefix=f"{API_PREFIX}/retell-compat", dependencies=[Depends(check_rate_limit)])
 app.include_router(monitor_router, prefix=API_PREFIX)
 
 

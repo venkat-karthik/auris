@@ -17,6 +17,7 @@ from app.services.pipeline.stt.sarvam_stt import SarvamSTT
 from app.services.pipeline.tts.elevenlabs_tts import ElevenLabsTTS
 from app.services.pipeline.tts.sarvam_tts import SarvamTTS
 from app.services.pipeline.tts.cartesia_tts import CartesiaTTS
+from app.services.pipeline.llm.retell_websocket_llm import RetellWebsocketLLM
 
 
 def build_pipeline(
@@ -56,7 +57,15 @@ def build_pipeline(
     llm_model = llm_cfg.get("model") or _default_llm_model(llm_provider, cost_tier)
     initial_msg = model_config.get("initial_message")
 
-    if llm_provider == "groq":
+    if llm_provider in ("retell-custom-llm", "custom-websocket") or model_config.get("custom_llm_websocket_url"):
+        ws_url = model_config.get("custom_llm_websocket_url") or llm_cfg.get("websocket_url") or llm_cfg.get("url", "")
+        llm = RetellWebsocketLLM(
+            websocket_url=ws_url,
+            model_config=model_config,
+            system_prompt=system_prompt,
+            initial_message=initial_msg,
+        )
+    elif llm_provider == "groq":
         llm = GroqLLM(
             api_key=llm_key,
             model=llm_model,

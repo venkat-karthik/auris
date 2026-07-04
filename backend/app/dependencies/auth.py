@@ -50,13 +50,16 @@ async def get_current_user(
             return user
         raise _UNAUTHORIZED
 
-    # 2. Try Bearer JWT
+    # 2. Try Bearer JWT or Bearer API Key (Retell SDK compatibility)
     if credentials:
         payload = decode_access_token(credentials.credentials)
         if payload:
             user = await _get_user_by_id(int(payload["sub"]), db)
             if user and user.is_active:
                 return user
+        user = await _get_user_by_api_key(credentials.credentials, db)
+        if user and user.is_active:
+            return user
 
     raise _UNAUTHORIZED
 
