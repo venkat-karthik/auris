@@ -26,9 +26,12 @@ export class AurisVoiceClient {
     this.scriptProcessor = null;
 
     // Audio playback state
-    this.playbackQueue = [];
+    this.activeSources = new Set();
     this.isPlaying = false;
-    this.activeSourceNode = null;
+    this.nextPlayTime = 0;
+
+    // Transcript history buffer (keeps last 10 turns)
+    this.transcriptHistory = [];
 
     // Event listeners
     this.listeners = {
@@ -38,7 +41,9 @@ export class AurisVoiceClient {
       interrupted: [],
       end: [],
       error: [],
-      volume: []
+      volume: [],
+      agent_start_talking: [],
+      agent_stop_talking: []
     };
 
     this.connected = false;
@@ -103,14 +108,14 @@ export class AurisVoiceClient {
       const wsUrl = `${this.baseUrl}/api/v1/calls/ws/${this.agentId}?${query.toString()}`;
       this.ws = new WebSocket(wsUrl);
 
-      this.ws.onopen = () => {
+      this.ws.onopen = async () => {
         this.connected = true;
         // Send initial start signaling message
         this.ws.send(JSON.stringify({
           type: "start",
           context: context
         }));
-        this._setupMicrophoneCapture();
+        await this._setupMicrophoneCapture();
         this._emit("start", { agentId: this.agentId });
       };
 
@@ -138,15 +143,70 @@ export class AurisVoiceClient {
   }
 
   /**
-   * Setup microphone audio capture, downsampling to 16kHz PCM mono.
+   * Setup microphone audio capture using modern AudioWorkletNode (with fallback to ScriptProcessorNode).
    */
-  _setupMicrophoneCapture() {
+  async _setupMicrophoneCapture() {
     if (!this.audioContext || !this.mediaStream) return;
 
     this.micSource = this.audioContext.createMediaStreamSource(this.mediaStream);
+
+    try {
+      if (this.audioContext.audioWorklet) {
+        const workletCode = `
+          class AurisAudioProcessor extends AudioWorkletProcessor {
+            constructor() {
+              super();
+              this.bufferSize = 4096;
+              this.buffer = new Float32Array(this.bufferSize);
+              this.bytesWritten = 0;
+            }
+            process(inputs, outputs, parameters) {
+              const input = inputs[0];
+              if (!input || !input.length || !input[0].length) return true;
+              const channelData = input[0];
+              let sumSq = 0;
+              for (let i = 0; i < channelData.length; i++) {
+                sumSq += channelData[i] * channelData[i];
+                this.buffer[this.bytesWritten++] = channelData[i];
+                if (this.bytesWritten >= this.bufferSize) {
+                  this.port.postMessage({
+                    type: 'audio_chunk',
+                    data: this.buffer.slice(0),
+                    rms: Math.sqrt(sumSq / channelData.length)
+                  });
+                  this.bytesWritten = 0;
+                  sumSq = 0;
+                }
+              }
+              return true;
+            }
+          }
+          registerProcessor('auris-audio-processor', AurisAudioProcessor);
+        `;
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const workletUrl = URL.createObjectURL(blob);
+        await this.audioContext.audioWorklet.addModule(workletUrl);
+        URL.revokeObjectURL(workletUrl);
+
+        this.workletNode = new AudioWorkletNode(this.audioContext, 'auris-audio-processor');
+        this.workletNode.port.onmessage = (event) => {
+          if (!this.connected || this.muted) return;
+          const { data, rms } = event.data;
+          this._emit("volume", { level: Math.min(1, rms * 5) });
+          this._processAndSendAudio(data, this.audioContext.sampleRate);
+        };
+
+        this.micSource.connect(this.workletNode);
+        this.workletNode.connect(this.audioContext.destination);
+        return;
+      }
+    } catch (err) {
+      console.warn("AudioWorklet initialization failed, falling back to ScriptProcessorNode:", err);
+    }
+
+    // Fallback to ScriptProcessorNode for older browser support
     const bufferSize = 4096;
     this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
-
     this.micSource.connect(this.scriptProcessor);
     this.scriptProcessor.connect(this.audioContext.destination);
 
@@ -156,7 +216,6 @@ export class AurisVoiceClient {
       const inputBuffer = audioProcessingEvent.inputBuffer;
       const inputData = inputBuffer.getChannelData(0);
 
-      // Calculate audio volume / level for visualizer
       let sumSq = 0;
       for (let i = 0; i < inputData.length; i++) {
         sumSq += inputData[i] * inputData[i];
@@ -164,27 +223,29 @@ export class AurisVoiceClient {
       const rms = Math.sqrt(sumSq / inputData.length);
       this._emit("volume", { level: Math.min(1, rms * 5) });
 
-      // Resample to target sample rate (16000 Hz)
-      const resampled = this._resamplePCM(inputData, inputBuffer.sampleRate, this.sampleRate);
-      
-      // Convert Float32 to Int16 PCM bytes
-      const pcm16 = new Int16Array(resampled.length);
-      for (let i = 0; i < resampled.length; i++) {
-        let s = Math.max(-1, Math.min(1, resampled[i]));
-        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-
-      // Base64 encode PCM bytes
-      const bytes = new Uint8Array(pcm16.buffer);
-      const base64 = this._bytesToBase64(bytes);
-
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: "audio",
-          data: base64
-        }));
-      }
+      this._processAndSendAudio(inputData, inputBuffer.sampleRate);
     };
+  }
+
+  /**
+   * Helper to resample, encode to Int16 PCM base64, and transmit over WebSocket.
+   */
+  _processAndSendAudio(inputData, sampleRate) {
+    const resampled = this._resamplePCM(inputData, sampleRate, this.sampleRate);
+    const pcm16 = new Int16Array(resampled.length);
+    for (let i = 0; i < resampled.length; i++) {
+      let s = Math.max(-1, Math.min(1, resampled[i]));
+      pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    const bytes = new Uint8Array(pcm16.buffer);
+    const base64 = this._bytesToBase64(bytes);
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "audio",
+        data: base64
+      }));
+    }
   }
 
   /**
@@ -200,9 +261,25 @@ export class AurisVoiceClient {
         break;
 
       case "transcript":
-        this._emit("transcript", {
+        const role = msg.role || "agent";
+        const entry = {
+          id: msg.id || Date.now().toString() + "-" + Math.random().toString(36).substr(2, 4),
+          role: role,
           text: msg.text || "",
-          final: !!msg.final
+          final: !!msg.final,
+          timestamp: new Date().toISOString()
+        };
+
+        if (entry.final) {
+          this.transcriptHistory.push(entry);
+          if (this.transcriptHistory.length > 10) {
+            this.transcriptHistory.shift();
+          }
+        }
+
+        this._emit("transcript", {
+          ...entry,
+          history: [...this.transcriptHistory]
         });
         break;
 
@@ -223,7 +300,7 @@ export class AurisVoiceClient {
   }
 
   /**
-   * Queue incoming Base64 PCM audio chunk for seamless playback.
+   * Queue incoming Base64 PCM audio chunk for gapless playback scheduling.
    */
   _queueAudioPlayback(base64Data) {
     const bytes = this._base64ToBytes(base64Data);
@@ -239,50 +316,63 @@ export class AurisVoiceClient {
     const audioBuffer = this.audioContext.createBuffer(1, float32.length, this.sampleRate);
     audioBuffer.getChannelData(0).set(float32);
 
-    this.playbackQueue.push(audioBuffer);
-    if (!this.isPlaying) {
-      this._playNextBuffer();
-    }
+    this._scheduleBuffer(audioBuffer);
   }
 
   /**
-   * Play the next audio buffer from queue.
+   * Schedule audio buffer using precise AudioContext.currentTime timestamps for gapless playback.
    */
-  _playNextBuffer() {
-    if (this.playbackQueue.length === 0 || !this.audioContext) {
-      this.isPlaying = false;
-      return;
+  _scheduleBuffer(audioBuffer) {
+    if (!this.audioContext) return;
+
+    if (!this.isPlaying) {
+      this.isPlaying = true;
+      this._emit("agent_start_talking", {});
     }
 
-    this.isPlaying = true;
-    const buffer = this.playbackQueue.shift();
     const source = this.audioContext.createBufferSource();
-    source.buffer = buffer;
+    source.buffer = audioBuffer;
     source.connect(this.audioContext.destination);
 
-    this.activeSourceNode = source;
-    source.onended = () => {
-      this.activeSourceNode = null;
-      this._playNextBuffer();
-    };
+    const currentTime = this.audioContext.currentTime;
+    if (this.nextPlayTime < currentTime) {
+      this.nextPlayTime = currentTime;
+    }
 
-    source.start();
+    source.start(this.nextPlayTime);
+    this.nextPlayTime += audioBuffer.duration;
+
+    this.activeSources.add(source);
+
+    source.onended = () => {
+      this.activeSources.delete(source);
+      if (this.activeSources.size === 0) {
+        this.isPlaying = false;
+        this._emit("agent_stop_talking", {});
+      }
+    };
   }
 
   /**
    * Flush audio playback queue immediately (used during interruptions).
    */
   _flushAudioPlayback() {
-    this.playbackQueue = [];
-    if (this.activeSourceNode) {
-      try {
-        this.activeSourceNode.stop();
-      } catch (e) {
-        // Ignore if already stopped
-      }
-      this.activeSourceNode = null;
+    this.nextPlayTime = 0;
+    if (this.activeSources && this.activeSources.size > 0) {
+      this.activeSources.forEach(source => {
+        try {
+          source.onended = null; // Prevent onended from firing during flush
+          source.stop();
+        } catch (e) {
+          // Ignore if already stopped
+        }
+      });
+      this.activeSources.clear();
     }
-    this.isPlaying = false;
+    if (this.isPlaying) {
+      this.isPlaying = false;
+      this._emit("agent_stop_talking", {});
+    }
   }
 
   /**
@@ -318,6 +408,10 @@ export class AurisVoiceClient {
 
     this._flushAudioPlayback();
 
+    if (this.workletNode) {
+      this.workletNode.disconnect();
+      this.workletNode = null;
+    }
     if (this.scriptProcessor) {
       this.scriptProcessor.disconnect();
       this.scriptProcessor = null;
