@@ -1,0 +1,13 @@
+[project]
+name = "auris-mcp-server"
+version = "1.0.0"
+description = "Auris Enterprise Voice AI Platform — Model Context Protocol (MCP) Server"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=2.3.0",
+    "auris-python>=1.0.0",
+]
+
+[project.scripts]
+auris-mcp-server = "main:create_app"

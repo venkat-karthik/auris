@@ -34,3 +34,6 @@ backend/.env
 frontend/.env
 *.key
 *.pem
+
+# Reference / Benchmark code
+omnidim-python-sdk/

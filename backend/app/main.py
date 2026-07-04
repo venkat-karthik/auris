@@ -26,6 +26,7 @@ from app.routes.whatsapp import router as whatsapp_router
 from app.routes.integrations import router as integrations_router
 from app.routes.cloned_voices import router as cloned_voices_router
 from app.routes.reseller import router as reseller_router
+from app.routes.mcp import router as mcp_router
 from app.dependencies.rate_limit import check_rate_limit
 
 
@@ -81,6 +82,7 @@ app.include_router(whatsapp_router, prefix=API_PREFIX, dependencies=[Depends(che
 app.include_router(integrations_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(cloned_voices_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(reseller_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(mcp_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(monitor_router, prefix=API_PREFIX)
 
 
