@@ -62,12 +62,26 @@ async def test_telephony_ws_flow(db_session: AsyncSession, test_org, test_user):
         yield b"chunk1"
         yield b"chunk2"
 
-    mock_send_pcm = AsyncMock()
+    mock_send_pcm = AsyncMock(return_value=(b"mock_ulaw", None))
+
+    mock_redis = MagicMock()
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.publish = AsyncMock()
+    mock_pubsub = MagicMock()
+    mock_pubsub.subscribe = AsyncMock()
+    async def mock_listen():
+        if False:
+            yield None
+    mock_pubsub.listen = mock_listen
+    mock_pubsub.unsubscribe = AsyncMock()
+    mock_redis.pubsub = MagicMock(return_value=mock_pubsub)
 
     with (
         patch("app.routes.telephony.build_pipeline", return_value=MockPipelineEngine()),
         patch("app.routes.telephony.TelnyxTransport.receive_ulaw", side_effect=mock_receive_ulaw),
-        patch("app.routes.telephony.TelnyxTransport.send_pcm", mock_send_pcm)
+        patch("app.routes.telephony.TelnyxTransport.send_pcm", mock_send_pcm),
+        patch("app.dependencies.rate_limit.redis_client", mock_redis),
+        patch("arq.create_pool", AsyncMock())
     ):
         # We can use Starlette's TestClient to test the WebSocket endpoint sync-style
         client = TestClient(app)
@@ -77,7 +91,7 @@ async def test_telephony_ws_flow(db_session: AsyncSession, test_org, test_user):
             # The websocket connection will accept, query DB, start pipeline,
             # process the mocked generator yields, send PCM, and gracefully stop.
             import time
-            time.sleep(0.5)
+            time.sleep(1.0)
 
     # Verify send_pcm was called with output data
     assert mock_send_pcm.call_count > 0

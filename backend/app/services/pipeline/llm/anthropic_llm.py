@@ -71,7 +71,10 @@ class AnthropicLLM(BaseProcessor):
             text = data.get("text", "").strip()
             if not text:
                 return
-            self._messages.append({"role": "user", "content": text})
+            if text.startswith("[SYSTEM"):
+                self._messages.append({"role": "system", "content": text})
+            else:
+                self._messages.append({"role": "user", "content": text})
             
             if self._gen_task and not self._gen_task.done():
                 self._gen_task.cancel()
@@ -199,13 +202,18 @@ class AnthropicLLM(BaseProcessor):
         prompt_tokens = 0
         completion_tokens = 0
 
+        active_system_prompt = self.system_prompt
+        system_updates = [msg["content"] for msg in self._messages if msg["role"] == "system"]
+        if system_updates:
+            active_system_prompt += "\n" + "\n".join(system_updates)
+
         try:
             client = anthropic.AsyncAnthropic(api_key=self.api_key)
             async with client.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                system=self.system_prompt,
+                system=active_system_prompt,
                 messages=anthropic_messages,
                 tools=anthropic_tools if anthropic_tools else None
             ) as stream:

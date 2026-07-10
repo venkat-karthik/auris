@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy import select

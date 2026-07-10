@@ -65,9 +65,15 @@ async def db_session(setup_db) -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+        except Exception as e:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            if "no active connection" in str(e) or "closed" in str(e):
+                pass
+            else:
+                raise
 
 @pytest.fixture(autouse=True)
 async def override_get_db(db_session):

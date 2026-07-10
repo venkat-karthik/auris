@@ -63,6 +63,45 @@ async def verify_twilio_signature(request: Request, auth_token: str) -> bool:
 router = APIRouter()
 
 
+async def handle_mid_call_whatsapp_tool(args: dict, run_id: int, caller_number: str) -> dict:
+    msg_tmpl = args.get("message", "")
+    link_url = args.get("link_url")
+    sent_url = link_url
+    if link_url:
+        import secrets
+        import json
+        from app.core.config import BACKEND_URL
+        from app.dependencies.rate_limit import redis_client
+        token = secrets.token_urlsafe(16)
+        tracked_data = {
+            "call_run_id": run_id,
+            "original_url": link_url,
+            "clicked": False
+        }
+        await redis_client.set(f"tracked_link:{token}", json.dumps(tracked_data), ex=86400)
+        sent_url = f"{BACKEND_URL}/api/v1/links/click/{token}"
+        if "{link}" in msg_tmpl:
+            msg_text = msg_tmpl.replace("{link}", sent_url)
+        else:
+            msg_text = f"{msg_tmpl} {sent_url}"
+    else:
+        msg_text = msg_tmpl
+
+    from app.routes.whatsapp import send_whatsapp_message as raw_send_whatsapp
+    target_number = caller_number or ""
+    target_number = target_number.strip().replace(" ", "").replace("-", "")
+    if target_number and not target_number.startswith("+"):
+        target_number = "+" + target_number
+    if target_number:
+        success = await raw_send_whatsapp(target_number, msg_text)
+        if success:
+            return {"status": "sent", "recipient": target_number, "message_sent": msg_text}
+        else:
+            return {"status": "failed", "error": "WhatsApp sending API failed"}
+    else:
+        return {"status": "failed", "error": "No valid caller phone number found to send to"}
+
+
 @router.websocket("/telephony/ws/telnyx")
 async def telnyx_ws(
     websocket: WebSocket,
@@ -255,6 +294,23 @@ async def telnyx_ws(
         }
     })
 
+    # Register send_whatsapp_message tool
+    tools.append({
+        "type": "function",
+        "function": {
+            "name": "send_whatsapp_message",
+            "description": "Send a WhatsApp text message containing an optional trackable link/URL to the customer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "The message body template (e.g. 'Click here to view your invoice: {link}')."},
+                    "link_url": {"type": "string", "description": "The destination URL that the customer should visit (optional)."}
+                },
+                "required": ["message"]
+            }
+        }
+    })
+
     # Register custom tools from agent configuration
     custom_tools = agent.model_config.get("tools", [])
     if custom_tools:
@@ -411,6 +467,8 @@ async def telnyx_ws(
                     from app.services.pipeline.frame import Frame
                     await pipeline.push(Frame(type=FrameType.CALL_END))
                     result = {"status": "call_ended"}
+                elif name == "send_whatsapp_message":
+                    result = await handle_mid_call_whatsapp_tool(args, run_id, from_number)
 
                 if result is None:
                     # General-purpose server_url webhook for arbitrary tool calls
@@ -456,7 +514,18 @@ async def telnyx_ws(
         nonlocal voicemail_detection_done
         try:
             async for pcm_chunk in TelnyxTransport.receive_ulaw(websocket):
-                await pipeline.push(audio_in(pcm_chunk))
+                try:
+                    is_takeover = await redis_client.get(f"call_takeover:{run_id}")
+                except Exception:
+                    is_takeover = False
+                if is_takeover:
+                    import base64
+                    await redis_client.publish(
+                        f"call:audio:customer:{run_id}",
+                        json.dumps({"data": base64.b64encode(pcm_chunk).decode()})
+                    )
+                else:
+                    await pipeline.push(audio_in(pcm_chunk))
                 if call_type == "outbound" and not voicemail_detection_done:
                     voicemail_audio_accumulator.append(pcm_chunk)
                     total_bytes = sum(len(c) for c in voicemail_audio_accumulator)
@@ -496,12 +565,75 @@ async def telnyx_ws(
         except Exception as e:
             logger.info(f"Telnyx send loop ended/disconnected: {e}")
 
+    telnyx_supervisor_state = None
+
+    # Start Redis Pub/Sub link click event listener task
+    from app.dependencies.rate_limit import redis_client
+    event_listener_task = None
+
+    async def listen_redis_events():
+        nonlocal telnyx_supervisor_state
+        try:
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe(
+                f"call:link_clicks:{run_id}",
+                f"call:coaching:{run_id}",
+                f"call:audio:supervisor:{run_id}"
+            )
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    event_data = json.loads(message["data"])
+                    channel = message["channel"]
+
+                    if "link_clicks" in channel:
+                        if event_data.get("event") == "link_clicked":
+                            click_url = event_data.get("url", "")
+                            logger.info(f"Redis link click pub/sub event received for call {run_id}: {click_url}")
+                            await pipeline.push(Frame(
+                                type=FrameType.STT_TRANSCRIPT,
+                                data={"text": f"[SYSTEM NOTICE: Customer clicked the link: {click_url}]", "is_final": True}
+                            ))
+                    elif "coaching" in channel:
+                        instruction = event_data.get("instruction")
+                        if instruction:
+                            logger.info(f"Redis whisper coaching instruction received for call {run_id}: {instruction}")
+                            await pipeline.push(Frame(
+                                type=FrameType.STT_TRANSCRIPT,
+                                data={"text": f"[SYSTEM NOTICE: Supervisor guidance - {instruction}]", "is_final": True}
+                            ))
+                    elif "audio:supervisor" in channel:
+                        audio_b64 = event_data.get("data")
+                        try:
+                            is_takeover = await redis_client.get(f"call_takeover:{run_id}")
+                        except Exception:
+                            is_takeover = False
+                        if is_takeover and audio_b64:
+                            import base64
+                            supervisor_pcm = base64.b64decode(audio_b64)
+                            _, telnyx_supervisor_state = await TelnyxTransport.send_pcm(
+                                websocket, supervisor_pcm, telnyx_supervisor_state
+                            )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"Telnyx Redis listener offline: {e}")
+        finally:
+            try:
+                if pubsub.connection:
+                    await pubsub.unsubscribe()
+            except Exception:
+                pass
+
+    event_listener_task = asyncio.create_task(listen_redis_events())
+
     await pipeline.start()
     # Push CALL_START to start the pipeline conversation
     await pipeline.push(Frame(type=FrameType.CALL_START, data={"run_id": run_id}))
     try:
         await asyncio.gather(receive_loop(), send_loop())
     finally:
+        if event_listener_task:
+            event_listener_task.cancel()
         monitor_task.cancel()
         await pipeline.stop()
         from app.services.monitor_tracker import MonitorTracker
@@ -918,6 +1050,23 @@ async def twilio_ws(
         }
     })
 
+    # Register send_whatsapp_message tool
+    tools.append({
+        "type": "function",
+        "function": {
+            "name": "send_whatsapp_message",
+            "description": "Send a WhatsApp text message containing an optional trackable link/URL to the customer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "The message body template (e.g. 'Click here to view your invoice: {link}')."},
+                    "link_url": {"type": "string", "description": "The destination URL that the customer should visit (optional)."}
+                },
+                "required": ["message"]
+            }
+        }
+    })
+
     # Register custom tools from agent configuration
     custom_tools = agent.model_config.get("tools", [])
     if custom_tools:
@@ -1072,6 +1221,8 @@ async def twilio_ws(
                     from app.services.pipeline.frame import Frame
                     await pipeline.push(Frame(type=FrameType.CALL_END))
                     result = {"status": "call_ended"}
+                elif name == "send_whatsapp_message":
+                    result = await handle_mid_call_whatsapp_tool(args, run_id, from_number)
 
                 if result is None:
                     # General-purpose server_url webhook for arbitrary tool calls
@@ -1141,7 +1292,17 @@ async def twilio_ws(
                         pcm_8k = TwilioTransport.ulaw_to_pcm(raw_ulaw)
                         pcm_16k, state = TwilioTransport.resample(pcm_8k, TwilioTransport.INPUT_RATE, TwilioTransport.OUTPUT_RATE, state)
                         
-                        await pipeline.push(audio_in(pcm_16k))
+                        try:
+                            is_takeover = await redis_client.get(f"call_takeover:{run_id}")
+                        except Exception:
+                            is_takeover = False
+                        if is_takeover:
+                            await redis_client.publish(
+                                f"call:audio:customer:{run_id}",
+                                json.dumps({"data": base64.b64encode(pcm_16k).decode()})
+                            )
+                        else:
+                            await pipeline.push(audio_in(pcm_16k))
                         
                         # Voicemail accum
                         if call_type == "outbound" and not voicemail_detection_done:
@@ -1188,12 +1349,76 @@ async def twilio_ws(
         except Exception as e:
             logger.info(f"Twilio send loop disconnected: {e}")
 
+    twilio_supervisor_state = None
+
+    # Start Redis Pub/Sub link click event listener task
+    from app.dependencies.rate_limit import redis_client
+    event_listener_task = None
+
+    async def listen_redis_events():
+        nonlocal twilio_supervisor_state
+        try:
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe(
+                f"call:link_clicks:{run_id}",
+                f"call:coaching:{run_id}",
+                f"call:audio:supervisor:{run_id}"
+            )
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    event_data = json.loads(message["data"])
+                    channel = message["channel"]
+
+                    if "link_clicks" in channel:
+                        if event_data.get("event") == "link_clicked":
+                            click_url = event_data.get("url", "")
+                            logger.info(f"Redis link click pub/sub event received for call {run_id}: {click_url}")
+                            await pipeline.push(Frame(
+                                type=FrameType.STT_TRANSCRIPT,
+                                data={"text": f"[SYSTEM NOTICE: Customer clicked the link: {click_url}]", "is_final": True}
+                            ))
+                    elif "coaching" in channel:
+                        instruction = event_data.get("instruction")
+                        if instruction:
+                            logger.info(f"Redis whisper coaching instruction received for call {run_id}: {instruction}")
+                            await pipeline.push(Frame(
+                                type=FrameType.STT_TRANSCRIPT,
+                                data={"text": f"[SYSTEM NOTICE: Supervisor guidance - {instruction}]", "is_final": True}
+                            ))
+                    elif "audio:supervisor" in channel:
+                        audio_b64 = event_data.get("data")
+                        try:
+                            is_takeover = await redis_client.get(f"call_takeover:{run_id}")
+                        except Exception:
+                            is_takeover = False
+                        if is_takeover and audio_b64:
+                            import base64
+                            supervisor_pcm = base64.b64decode(audio_b64)
+                            if stream_sid:
+                                _, twilio_supervisor_state = await TwilioTransport.send_pcm(
+                                    websocket, stream_sid, supervisor_pcm, twilio_supervisor_state
+                                )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"Twilio Redis listener offline: {e}")
+        finally:
+            try:
+                if pubsub.connection:
+                    await pubsub.unsubscribe()
+            except Exception:
+                pass
+
+    event_listener_task = asyncio.create_task(listen_redis_events())
+
     await pipeline.start()
     # Push CALL_START to start the pipeline conversation
     await pipeline.push(Frame(type=FrameType.CALL_START, data={"run_id": run_id, "call_type": call_type}))
     try:
         await asyncio.gather(receive_loop(), send_loop())
     finally:
+        if event_listener_task:
+            event_listener_task.cancel()
         monitor_task.cancel()
         await pipeline.stop()
         from app.services.monitor_tracker import MonitorTracker

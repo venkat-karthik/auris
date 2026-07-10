@@ -27,10 +27,11 @@ class WebRTCTransport:
         { "type": "end" }
     """
 
-    def __init__(self, ws: WebSocket, pipeline_push, pipeline_collect):
+    def __init__(self, ws: WebSocket, pipeline_push, pipeline_collect, run_id: int | None = None):
         self.ws = ws
         self._push = pipeline_push      # async fn to push frames into pipeline
         self._collect = pipeline_collect  # async fn to get frames from pipeline
+        self.run_id = run_id
 
     async def run(self) -> None:
         """Run receive and send loops concurrently."""
@@ -61,7 +62,23 @@ class WebRTCTransport:
                         started = True
                         logger.info("WebRTC call started via fallback on first audio frame")
                     pcm = base64.b64decode(msg["data"])
-                    await self._push(audio_in(pcm))
+
+                    # Intercept customer audio in takeover mode
+                    is_takeover = False
+                    if self.run_id:
+                        try:
+                            from app.dependencies.rate_limit import redis_client
+                            is_takeover = await redis_client.get(f"call_takeover:{self.run_id}")
+                        except Exception as ex:
+                            logger.warning(f"Redis not available for takeover check: {ex}")
+
+                    if is_takeover:
+                        await redis_client.publish(
+                            f"call:audio:customer:{self.run_id}",
+                            json.dumps({"data": msg["data"]})
+                        )
+                    else:
+                        await self._push(audio_in(pcm))
 
                 elif msg_type == "end":
                     await self._push(call_end("user_hangup"))

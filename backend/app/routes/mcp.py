@@ -152,9 +152,10 @@ async def call_mcp_tool(
             org_id=org.id,
             agent_id=agent.id,
             caller_number=to_number,
-            direction="outbound",
+            transport="telnyx",
+            call_type="outbound",
             status="initiated",
-            context_data=call_context,
+            initial_context=call_context,
         )
         db.add(call_run)
         await db.commit()
@@ -202,7 +203,7 @@ async def list_mcp_resources(
     elif uri == "calls://recent":
         res = await db.execute(select(CallRun).where(CallRun.org_id == org.id).order_by(CallRun.created_at.desc()).limit(20))
         calls = res.scalars().all()
-        return {"uri": "calls://recent", "data": [{"id": c.id, "status": c.status, "direction": c.direction} for c in calls]}
+        return {"uri": "calls://recent", "data": [{"id": c.id, "status": c.status, "direction": c.call_type} for c in calls]}
 
     elif uri == "campaigns://active":
         res = await db.execute(select(Campaign).where(Campaign.org_id == org.id, Campaign.status == "running"))

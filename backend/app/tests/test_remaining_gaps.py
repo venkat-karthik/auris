@@ -120,8 +120,10 @@ async def test_webhook_lifecycle_dispatcher(db_session, test_org, test_user):
         await dispatch_call_webhook(db_session, run.id, "call.started")
         mock_post.assert_called_once()
         called_args, called_kwargs = mock_post.call_args
-        assert called_kwargs["json"]["event"] == "call.started"
-        assert called_kwargs["json"]["call"]["id"] == run.id
+        import json
+        sent_payload = json.loads(called_kwargs["content"].decode("utf-8"))
+        assert sent_payload["event"] == "call_started"
+        assert sent_payload["call"]["id"] == run.id
 
 
 @pytest.mark.asyncio

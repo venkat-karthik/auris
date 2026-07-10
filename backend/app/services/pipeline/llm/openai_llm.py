@@ -79,7 +79,10 @@ class OpenAILLM(BaseProcessor):
             text = data.get("text", "").strip()
             if not text:
                 return
-            self._messages.append({"role": "user", "content": text})
+            if text.startswith("[SYSTEM"):
+                self._messages.append({"role": "system", "content": text})
+            else:
+                self._messages.append({"role": "user", "content": text})
             
             # Cancel existing task on new input (barge-in or next user turn)
             if self._gen_task and not self._gen_task.done():

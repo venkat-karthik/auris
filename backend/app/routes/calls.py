@@ -404,6 +404,23 @@ async def websocket_call(
         }
     })
 
+    # Register send_whatsapp_message tool
+    tools.append({
+        "type": "function",
+        "function": {
+            "name": "send_whatsapp_message",
+            "description": "Send a WhatsApp text message containing an optional trackable link/URL to the customer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "The message body template (e.g. 'Click here to view your invoice: {link}')."},
+                    "link_url": {"type": "string", "description": "The destination URL that the customer should visit (optional)."}
+                },
+                "required": ["message"]
+            }
+        }
+    })
+
     # Register custom tools from agent configuration
     custom_tools = agent.model_config.get("tools", [])
     if custom_tools:
@@ -559,6 +576,42 @@ async def websocket_call(
                 elif name == "end_call":
                     await pipeline.push(Frame(type=FrameType.CALL_END))
                     result = {"status": "call_ended"}
+                elif name == "send_whatsapp_message":
+                    msg_tmpl = args.get("message", "")
+                    link_url = args.get("link_url")
+                    sent_url = link_url
+                    if link_url:
+                        import secrets
+                        from app.core.config import BACKEND_URL
+                        from app.dependencies.rate_limit import redis_client
+                        token = secrets.token_urlsafe(16)
+                        tracked_data = {
+                            "call_run_id": run_id,
+                            "original_url": link_url,
+                            "clicked": False
+                        }
+                        await redis_client.set(f"tracked_link:{token}", json.dumps(tracked_data), ex=86400)
+                        sent_url = f"{BACKEND_URL}/api/v1/links/click/{token}"
+                        if "{link}" in msg_tmpl:
+                            msg_text = msg_tmpl.replace("{link}", sent_url)
+                        else:
+                            msg_text = f"{msg_tmpl} {sent_url}"
+                    else:
+                        msg_text = msg_tmpl
+
+                    from app.routes.whatsapp import send_whatsapp_message as raw_send_whatsapp
+                    target_number = caller_number or ""
+                    target_number = target_number.strip().replace(" ", "").replace("-", "")
+                    if target_number and not target_number.startswith("+"):
+                        target_number = "+" + target_number
+                    if target_number:
+                        success = await raw_send_whatsapp(target_number, msg_text)
+                        if success:
+                            result = {"status": "sent", "recipient": target_number, "message_sent": msg_text}
+                        else:
+                            result = {"status": "failed", "error": "WhatsApp sending API failed"}
+                    else:
+                        result = {"status": "failed", "error": "No valid caller phone number found to send to"}
 
                 if result is None:
                     # General-purpose server_url webhook for arbitrary tool calls
@@ -591,6 +644,7 @@ async def websocket_call(
         ws=websocket,
         pipeline_push=pipeline.push,
         pipeline_collect=collecting_wrapper,
+        run_id=run_id,
     )
 
     start_time = datetime.now(UTC)
@@ -600,6 +654,60 @@ async def websocket_call(
     monitor_task = asyncio.create_task(
         credit_monitor_loop(run_id, agent.org_id, cost_tier, pipeline, websocket)
     )
+
+    # Start Redis Pub/Sub link click event listener task
+    from app.dependencies.rate_limit import redis_client
+    event_listener_task = None
+
+    async def listen_redis_events():
+        try:
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe(
+                f"call:link_clicks:{run_id}",
+                f"call:coaching:{run_id}",
+                f"call:audio:supervisor:{run_id}"
+            )
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    event_data = json.loads(message["data"])
+                    channel = message["channel"]
+
+                    if "link_clicks" in channel:
+                        if event_data.get("event") == "link_clicked":
+                            click_url = event_data.get("url", "")
+                            logger.info(f"Redis link click pub/sub event received for call {run_id}: {click_url}")
+                            await pipeline.push(Frame(
+                                type=FrameType.STT_TRANSCRIPT,
+                                data={"text": f"[SYSTEM NOTICE: Customer clicked the link: {click_url}]", "is_final": True}
+                            ))
+                    elif "coaching" in channel:
+                        instruction = event_data.get("instruction")
+                        if instruction:
+                            logger.info(f"Redis whisper coaching instruction received for call {run_id}: {instruction}")
+                            await pipeline.push(Frame(
+                                type=FrameType.STT_TRANSCRIPT,
+                                data={"text": f"[SYSTEM NOTICE: Supervisor guidance - {instruction}]", "is_final": True}
+                            ))
+                    elif "audio:supervisor" in channel:
+                        audio_b64 = event_data.get("data")
+                        try:
+                            is_takeover = await redis_client.get(f"call_takeover:{run_id}")
+                        except Exception:
+                            is_takeover = False
+                        if is_takeover and audio_b64:
+                            await websocket.send_json({"type": "audio", "data": audio_b64})
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"Redis event listener offline: {e}")
+        finally:
+            try:
+                if pubsub.connection:
+                    await pubsub.unsubscribe()
+            except Exception:
+                pass
+
+    event_listener_task = asyncio.create_task(listen_redis_events())
 
     try:
         await pipeline.start()
@@ -611,6 +719,8 @@ async def websocket_call(
     except Exception as e:
         logger.error(f"WebRTC call error: run={run_id} error={e}")
     finally:
+        if event_listener_task:
+            event_listener_task.cancel()
         monitor_task.cancel()
         try:
             await pipeline.stop()

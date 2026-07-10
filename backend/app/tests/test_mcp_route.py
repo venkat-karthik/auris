@@ -67,6 +67,48 @@ async def test_mcp_list_resources(client: AsyncClient, auth_headers, db_session:
     names = [a["name"] for a in data["data"]]
     assert "Resource Agent" in names
 
+    # Add a call run to test calls://recent
+    from app.models.call_run import CallRun
+    call_run = CallRun(
+        org_id=test_org.id,
+        agent_id=agent.id,
+        transport="telnyx",
+        call_type="outbound",
+        status="initiated",
+    )
+    db_session.add(call_run)
+    await db_session.commit()
+
+    response = await client.get("/mcp/resources?uri=calls://recent", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["uri"] == "calls://recent"
+    assert len(data["data"]) == 1
+    assert data["data"][0]["direction"] == "outbound"
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_dispatch_call(client: AsyncClient, auth_headers, db_session: AsyncSession, test_org, test_user):
+    agent = Agent(org_id=test_org.id, created_by=test_user.id, name="Dispatch Agent", is_active=True)
+    db_session.add(agent)
+    await db_session.commit()
+
+    payload = {
+        "name": "dispatch_call",
+        "arguments": {
+            "agent_id": agent.id,
+            "to_number": "+15551234567",
+            "call_context": {"user_name": "Alice"}
+        }
+    }
+    response = await client.post("/mcp/tools/call", json=payload, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["result"]["to_number"] == "+15551234567"
+    assert data["result"]["status"] == "initiated"
+
+
 @pytest.mark.asyncio
 async def test_mcp_invalid_tool(client: AsyncClient, auth_headers):
     payload = {"name": "unknown_tool_call"}
