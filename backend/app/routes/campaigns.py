@@ -41,6 +41,21 @@ class CampaignStats(BaseModel):
     failed: int
 
 
+@router.get("", response_model=list[CampaignResponse])
+async def list_campaigns(
+    org: Organization = Depends(get_current_org),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all outbound dialer campaigns for the organization."""
+    result = await db.execute(
+        select(Campaign)
+        .where(Campaign.org_id == org.id)
+        .order_by(Campaign.created_at.desc())
+    )
+    return result.scalars().all()
+
+
 @router.post("", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     payload: CampaignCreate,

@@ -34,6 +34,7 @@ async def list_cloned_voices(
     return items
 
 
+@router.post("", response_model=ClonedVoiceResponse)
 @router.post("/upload", response_model=ClonedVoiceResponse)
 async def upload_voice_sample(
     name: str = Form(...),

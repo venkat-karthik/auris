@@ -30,12 +30,14 @@ class MCPManifestResponse(BaseModel):
     resources: List[Dict[str, Any]]
 
 
-class MCPToolCallRequest(BaseModel):
-    name: str
+class MCPInvokeRequest(BaseModel):
+    tool_name: str | None = None
+    name: str | None = None
     arguments: Dict[str, Any] = {}
 
 
-@router.get("", response_model=MCPManifestResponse)
+@router.get("")
+@router.get("/tools")
 async def get_mcp_manifest():
     """Get the Model Context Protocol server manifest and available tools/resources."""
     tools = [
@@ -93,15 +95,19 @@ async def get_mcp_manifest():
 
 
 @router.post("/tools/call")
+@router.post("/invoke")
 async def call_mcp_tool(
-    body: MCPToolCallRequest,
+    body: MCPInvokeRequest,
     user: User = Depends(get_current_user),
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
     """Execute an MCP tool call against the Auris platform."""
     args = body.arguments or {}
-    tool_name = body.name
+    tool_name = body.tool_name or body.name
+    if not tool_name:
+        raise HTTPException(status_code=400, detail="tool_name or name is required")
+
 
     if tool_name == "get_balance":
         return {

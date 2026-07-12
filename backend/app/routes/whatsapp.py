@@ -367,6 +367,61 @@ class SendMessageRequest(BaseModel):
     message: str
 
 
+class WhatsappTemplateResponse(BaseModel):
+    name: str
+    language: str
+    status: str
+    components: list[dict] = []
+
+
+class SendFollowupRequest(BaseModel):
+    call_run_id: int
+    template_name: str
+
+
+@router.get("/templates", response_model=list[WhatsappTemplateResponse])
+async def list_whatsapp_templates(
+    db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(get_current_org)
+):
+    """List available WhatsApp message templates."""
+    return [
+        WhatsappTemplateResponse(
+            name="post_call_summary_v1",
+            language="en_US",
+            status="APPROVED",
+            components=[{"type": "BODY", "text": "Hi {{1}}, thanks for speaking with {{2}} today. Summary: {{3}}"}]
+        ),
+        WhatsappTemplateResponse(
+            name="voicemail_followup",
+            language="en_US",
+            status="APPROVED",
+            components=[{"type": "BODY", "text": "We missed you! Our AI agent tried calling regarding {{1}}. Reply here anytime."}]
+        )
+    ]
+
+
+@router.post("/send")
+async def send_whatsapp_followup(
+    req: SendFollowupRequest,
+    db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(get_current_org)
+):
+    """Send template follow-up message linked to a call run."""
+    from app.models.call_run import CallRun
+    run_res = await db.execute(select(CallRun).where(CallRun.id == req.call_run_id, CallRun.org_id == org.id))
+    run = run_res.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Call run not found")
+
+    to_num = (run.customer_number or "").strip()
+    if not to_num:
+        raise HTTPException(status_code=400, detail="No customer number attached to this call run")
+
+    success = await send_whatsapp_message(to_num, f"Template {req.template_name} sent regarding call #{req.call_run_id}")
+    return {"message": "Follow-up message sent successfully", "success": success}
+
+
 @router.post("/{number_id}/send")
 async def send_whatsapp_message_route(
     number_id: int,

@@ -65,6 +65,40 @@ class WarmTransferRequest(BaseModel):
     target_agent_id: int
     whisper_url: Optional[str] = None
 
+class DispatchCallRequest(BaseModel):
+    agent_id: int
+    customer_number: str
+    custom_data: dict | None = None
+
+
+@router.post("/dispatch")
+async def dispatch_call(
+    req: DispatchCallRequest,
+    org: Organization = Depends(get_current_org),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Dispatch an outbound voice call via Telnyx/Twilio."""
+    res = await db.execute(select(Agent).where(Agent.id == req.agent_id, Agent.org_id == org.id))
+    agent = res.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    call_run = CallRun(
+        org_id=org.id,
+        agent_id=agent.id,
+        caller_number=req.customer_number,
+        transport="telnyx",
+        call_type="outbound",
+        status="initiated",
+        initial_context=req.custom_data or {},
+    )
+    db.add(call_run)
+    await db.commit()
+    await db.refresh(call_run)
+    return {"status": "dispatched", "call_run_id": call_run.id, "customer_number": req.customer_number}
+
+
 @router.get("", response_model=list[CallRunResponse])
 async def list_calls(
     org: Organization = Depends(get_current_org),

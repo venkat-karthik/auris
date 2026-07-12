@@ -49,6 +49,20 @@ services:
       timeout: 5s
       retries: 3
 
+  # ── MinIO Bucket Initializer ─────────────────────────────────────────────────
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb --ignore-existing myminio/auris-audio;
+      /usr/bin/mc anonymous set download myminio/auris-audio;
+      exit 0;
+      "
+
   # ── Backend API ───────────────────────────────────────────────────────────────
   backend:
     build:
@@ -65,8 +79,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-      - recordings_data:/app/recordings
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   # ── ARQ Worker ────────────────────────────────────────────────────────────────
   worker:
@@ -84,6 +97,18 @@ services:
       - ./backend:/app
       - recordings_data:/app/recordings
     command: arq app.tasks.worker.WorkerSettings
+
+  # ── Frontend Web Dashboard (Next.js 15) ───────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
 
   # ── TURN Server (coturn) ──────────────────────────────────────────────────────
   coturn:

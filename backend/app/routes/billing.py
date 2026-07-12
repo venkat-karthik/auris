@@ -184,3 +184,41 @@ async def get_balance(
     transactions = result.scalars().all()
     return BalanceResponse(balance_credits=float(org.balance_credits or 0.0), transactions=transactions)
 
+
+@router.post("/billing/create-order", response_model=CreateOrderResponse)
+@router.post("/create-order", response_model=CreateOrderResponse)
+async def create_order_alias(
+    payload: CreateOrderRequest,
+    user=Depends(get_current_user),
+    org=Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    return await create_order(payload, user, org, db)
+
+
+@router.post("/billing/verify-payment", response_model=VerifyPaymentResponse)
+@router.post("/verify-payment", response_model=VerifyPaymentResponse)
+async def verify_payment_alias(
+    payload: VerifyPaymentRequest,
+    user=Depends(get_current_user),
+    org=Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    return await verify_payment(payload, user, org, db)
+
+
+@router.get("/billing/transactions", response_model=list[CreditTransactionResponse])
+@router.get("/transactions", response_model=list[CreditTransactionResponse])
+async def list_transactions_alias(
+    user=Depends(get_current_user),
+    org=Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(CreditTransaction)
+        .where(CreditTransaction.org_id == org.id)
+        .order_by(CreditTransaction.created_at.desc())
+    )
+    return result.scalars().all()
+
+

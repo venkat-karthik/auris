@@ -30,6 +30,8 @@ from app.routes.mcp import router as mcp_router
 from app.routes.retell_compat import router as retell_compat_router
 from app.routes.links import router as links_router
 from app.routes.supervisor import router as supervisor_router
+from app.routes.organizations import router as organizations_router
+from app.routes.customers import router as customers_router
 from app.dependencies.rate_limit import check_rate_limit
 
 
@@ -72,11 +74,13 @@ app.add_middleware(
 API_PREFIX = "/api/v1"
 
 app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(organizations_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(agents_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(calls_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(telephony_router, prefix=API_PREFIX)
 app.include_router(billing_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
-app.include_router(knowledge_base_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(knowledge_base_router, prefix=f"{API_PREFIX}/knowledge-base", dependencies=[Depends(check_rate_limit)])
+app.include_router(knowledge_base_router, prefix=f"{API_PREFIX}/knowledge", dependencies=[Depends(check_rate_limit)])
 app.include_router(campaigns_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(api_keys_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(phone_numbers_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
@@ -84,6 +88,7 @@ app.include_router(analytics_router, prefix=API_PREFIX, dependencies=[Depends(ch
 app.include_router(whatsapp_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(integrations_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(cloned_voices_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
+app.include_router(customers_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(reseller_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(mcp_router, prefix=API_PREFIX, dependencies=[Depends(check_rate_limit)])
 app.include_router(retell_compat_router, prefix=f"{API_PREFIX}/retell", dependencies=[Depends(check_rate_limit)])

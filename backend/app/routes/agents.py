@@ -140,3 +140,35 @@ async def delete_agent(
         raise HTTPException(status_code=404, detail="Agent not found")
     agent.is_active = False
     await db.commit()
+
+
+@router.get("/{agent_id}/studio")
+async def get_studio_graph(
+    agent_id: int,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get visual studio workflow graph data for React Flow."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.org_id == org.id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"agent_id": agent.id, "graph": agent.graph or {}}
+
+
+@router.post("/{agent_id}/studio")
+async def save_studio_graph(
+    agent_id: int,
+    graph_data: dict,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save visual studio workflow graph from React Flow."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.org_id == org.id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    agent.graph = graph_data
+    await db.commit()
+    return {"status": "success", "agent_id": agent.id, "graph": agent.graph}
+

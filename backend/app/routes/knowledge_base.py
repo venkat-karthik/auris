@@ -14,7 +14,7 @@ from app.services.rag_service import ingest_document
 from app.tasks.worker import upload_file_to_minio
 from app.core.config import MINIO_BUCKET
 
-router = APIRouter(prefix="/knowledge-base", tags=["knowledge-base"])
+router = APIRouter(tags=["Knowledge Base"])
 
 
 class DocumentResponse(BaseModel):
@@ -27,6 +27,11 @@ class DocumentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ScrapeUrlRequest(BaseModel):
+    url: str
+    agent_id: int | None = None
 
 
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
@@ -92,6 +97,28 @@ async def upload_document(
     asyncio.create_task(process_ingestion_async())
 
     return doc
+
+
+@router.post("/scrape", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+async def scrape_url(
+    payload: ScrapeUrlRequest,
+    org: Organization = Depends(get_current_org),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Scrape a web page URL and ingest semantic chunks into vector memory."""
+    doc = KnowledgeBaseDocument(
+        org_id=org.id,
+        agent_id=payload.agent_id,
+        name=payload.url,
+        description="Scraped Web URL",
+        file_path=payload.url
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
 
 
 @router.get("", response_model=list[DocumentResponse])

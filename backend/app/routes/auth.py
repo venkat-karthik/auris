@@ -3,7 +3,7 @@ Auris - Auth routes: signup, login, me
 """
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Form, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +58,7 @@ class VerifyRequest(BaseModel):
     code: str
 
 
+@router.post("/register", response_model=SignupResponse, status_code=201)
 @router.post("/signup", response_model=SignupResponse, status_code=201)
 async def signup(
     body: SignupRequest,
@@ -150,11 +151,35 @@ async def verify_code(body: VerifyRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email.lower()))
+async def login(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    email_val = None
+    pass_val = None
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            data = await request.json()
+            email_val = data.get("email")
+            pass_val = data.get("password")
+        except Exception:
+            pass
+    else:
+        try:
+            form = await request.form()
+            email_val = form.get("username") or form.get("email")
+            pass_val = form.get("password")
+        except Exception:
+            pass
+
+    if not email_val or not pass_val:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+
+    result = await db.execute(select(User).where(User.email == email_val.lower()))
     user = result.scalar_one_or_none()
 
-    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+    if not user or not user.password_hash or not verify_password(pass_val, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -171,6 +196,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     token = create_access_token(user_id=user.id, org_id=user.selected_org_id)
     return TokenResponse(access_token=token, user_id=user.id, org_id=user.selected_org_id)
+
 
 
 @router.get("/me", response_model=MeResponse)
