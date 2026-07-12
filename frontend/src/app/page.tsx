@@ -1,9 +1,18 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
+import {
+  CallVolumeChart,
+  CallVolumeChartSkeleton,
+  CallCostChart,
+  CallCostChartSkeleton,
+  CallAnalyticsDashboard,
+  CallAnalyticsDashboardSkeleton
+} from '@/components/dashboard';
+
 import { AurisAPI, CallRun, Agent, AvailableInventoryItem } from '@/lib/api';
 import {
   Bot,
@@ -386,6 +395,21 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* ── Real-Time SRE Metrics & KPI Dashboard (React Suspense Boundaries) ─ */}
+        <Suspense fallback={<CallAnalyticsDashboardSkeleton />}>
+          <CallAnalyticsDashboard />
+        </Suspense>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Suspense fallback={<CallVolumeChartSkeleton />}>
+            <CallVolumeChart />
+          </Suspense>
+
+          <Suspense fallback={<CallCostChartSkeleton />}>
+            <CallCostChart />
+          </Suspense>
         </div>
 
         {/* ── Recent Call Runs & Monitoring Feed ──────────────────────────────── */}

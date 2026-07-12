@@ -26,6 +26,12 @@ class MonitorTracker:
             "last_transcript": "",
             "status": "running"
         }
+        try:
+            from app.services.metrics import AURIS_ACTIVE_CALLS, AURIS_TOTAL_CALLS_INITIATED
+            AURIS_ACTIVE_CALLS.set(len(cls.active_calls))
+            AURIS_TOTAL_CALLS_INITIATED.inc()
+        except Exception:
+            pass
         cls.broadcast({"type": "call_started", "call": cls.active_calls[run_id]})
 
     @classmethod
@@ -42,17 +48,34 @@ class MonitorTracker:
     def end_call(cls, run_id: int):
         if run_id in cls.active_calls:
             call = cls.active_calls.pop(run_id)
+            try:
+                from app.services.metrics import AURIS_ACTIVE_CALLS, AURIS_TOTAL_CALLS_ENDED
+                AURIS_ACTIVE_CALLS.set(len(cls.active_calls))
+                AURIS_TOTAL_CALLS_ENDED.inc()
+            except Exception:
+                pass
             cls.broadcast({"type": "call_ended", "run_id": run_id})
 
     @classmethod
     def add_listener(cls, websocket: WebSocket):
         cls.listeners.add(websocket)
+        try:
+            from app.services.metrics import AURIS_ACTIVE_LISTENERS
+            AURIS_ACTIVE_LISTENERS.set(len(cls.listeners))
+        except Exception:
+            pass
         # Immediately send list of active calls to the new listener
         return list(cls.active_calls.values())
 
     @classmethod
     def remove_listener(cls, websocket: WebSocket):
         cls.listeners.discard(websocket)
+        try:
+            from app.services.metrics import AURIS_ACTIVE_LISTENERS
+            AURIS_ACTIVE_LISTENERS.set(len(cls.listeners))
+        except Exception:
+            pass
+
 
     @classmethod
     def broadcast(cls, message: Dict[str, Any]):

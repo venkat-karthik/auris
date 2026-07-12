@@ -236,6 +236,7 @@ No critical crashes or unhandled exceptions remain after Phase 3 automated verif
 * **Task 1.2 [COMPLETED]:** Added Alembic migration `c3d4e5f6a7b8_add_hnsw_index_on_embedding.py` specifically creating `HNSW` index on vector embeddings (`Effort: 1 hour | Impact: 10x Vector Search Speed under heavy load`).
 
 
-### Priority 2 (Medium Value / Medium Effort) — Next 60 Days
-* **Task 2.1:** Integrate Prometheus `prometheus-fastapi-instrumentator` on `/metrics` endpoint (`Effort: 4 hours | Impact: Enterprise Monitoring & SRE Visibility`).
-* **Task 2.2:** Add React Suspense skeleton fallbacks around dashboard charts (`Effort: 3 hours | Impact: Perceived UI Performance`).
+### Priority 2 (Medium Value / Medium Effort) — Next 60 Days [ALL COMPLETED]
+* **Task 2.1 [COMPLETED]:** Integrated Prometheus `prometheus-fastapi-instrumentator` and custom voice telemetry gauges on both `/metrics` and `/api/v1/metrics` endpoints (`Effort: 4 hours | Impact: Enterprise Monitoring & SRE Visibility`).
+* **Task 2.2 [COMPLETED]:** Added real-time analytics widgets (`CallAnalyticsDashboard`, `CallVolumeChart`, `CallCostChart`) inside clean React Suspense boundaries with skeleton fallbacks on Command Center (`Effort: 3 hours | Impact: Perceived UI Performance`).
+

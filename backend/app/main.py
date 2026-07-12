@@ -61,6 +61,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Prometheus Metrics ────────────────────────────────────────────────────────
+from app.services.metrics import setup_prometheus_metrics
+setup_prometheus_metrics(app)
+
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
