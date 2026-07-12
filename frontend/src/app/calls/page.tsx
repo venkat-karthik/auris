@@ -23,78 +23,13 @@ import {
   Radio
 } from 'lucide-react';
 
-const MOCK_CALL_RUNS: CallRun[] = [
-  {
-    id: 1042,
-    agent_id: 1,
-    customer_number: '+1 (830) 982-7125',
-    agent_number: '+1 (830) 555-0101',
-    direction: 'inbound',
-    status: 'completed',
-    duration_seconds: 142,
-    summary: 'Customer called to inquire about enterprise SIP trunking setup and local DID pre-purchased pool pricing. Agent answered technical questions cleanly via pgvector RAG.',
-    sentiment: 'Positive',
-    key_topics: ['SIP Trunking', 'DID Inventory', 'Enterprise Pricing', 'RAG Query'],
-    task_completed: true,
-    created_at: '2026-07-12 12:44:00'
-  },
-  {
-    id: 1041,
-    agent_id: 2,
-    customer_number: '+91 98765 43210',
-    agent_number: '+1 (830) 555-0102',
-    direction: 'outbound',
-    status: 'completed',
-    duration_seconds: 88,
-    summary: 'Outbound campaign follow-up for Razorpay credit bundle top-up. Customer agreed to 5,000 credit tier.',
-    sentiment: 'Neutral',
-    key_topics: ['Billing', 'Credit Top-Up', 'Outbound Campaign'],
-    task_completed: true,
-    created_at: '2026-07-12 12:30:00'
-  },
-  {
-    id: 1040,
-    agent_id: 1,
-    customer_number: '+1 (415) 888-9900',
-    agent_number: '+1 (830) 555-0101',
-    direction: 'inbound',
-    status: 'voicemail',
-    duration_seconds: 34,
-    summary: 'Voicemail detected during initial greeting (VAD RMS threshold triggered). System recorded message and triggered WhatsApp follow-up template.',
-    sentiment: 'Neutral',
-    key_topics: ['Voicemail Detected', 'WhatsApp Triggered', 'RMS VAD'],
-    task_completed: false,
-    created_at: '2026-07-12 11:58:00'
-  },
-  {
-    id: 1039,
-    agent_id: 3,
-    customer_number: '+1 (650) 222-3344',
-    agent_number: '+1 (830) 555-0101',
-    direction: 'web',
-    status: 'completed',
-    duration_seconds: 215,
-    summary: 'WebRTC browser voice test exploring React Flow visual node execution and mid-call supervisor takeover.',
-    sentiment: 'Positive',
-    key_topics: ['Visual Studio', 'WebRTC Test', 'Supervisor Takeover'],
-    task_completed: true,
-    created_at: '2026-07-12 11:15:00'
-  }
-];
-
-const MOCK_TRANSCRIPT = [
-  { role: 'agent', time: '00:02', text: 'Hello! Thank you for calling Auris Corp. I am your AI conversational specialist. How can I assist you with our voice AI or SIP trunking today?' },
-  { role: 'customer', time: '00:10', text: 'Hi! I want to know if I can pre-purchase local Texas phone numbers without paying per-search carrier API fees.' },
-  { role: 'agent', time: '00:14', text: 'Yes, absolutely! With our Phase 1 V2 Local Inventory engine, all available phone numbers are pre-bought into our database pool. When you lease a number, it deducts exactly 160 credits from your balance with zero external search latency or carrier lookup charges!' },
-  { role: 'customer', time: '00:32', text: 'That is incredible. Can I also build visual state machines using React Flow for these agents?' },
-  { role: 'agent', time: '00:36', text: 'Yes! Our Visual Workflow Studio lets you drag-and-drop dialog nodes, tool invocations, and SIP transfers with real-time JSON sync.' }
-];
+// Clean database state initialization. No mock calls or mock transcripts definition.
 
 export default function CallsPage() {
   const { activeOrg } = useAuth();
-  const [calls, setCalls] = useState<CallRun[]>(MOCK_CALL_RUNS);
+  const [calls, setCalls] = useState<CallRun[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [selectedCall, setSelectedCall] = useState<CallRun | null>(MOCK_CALL_RUNS[0]);
+  const [selectedCall, setSelectedCall] = useState<CallRun | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [selectedAgentFilter, setSelectedAgentFilter] = useState<number | null>(null);
 
@@ -112,9 +47,11 @@ export default function CallsPage() {
           AurisAPI.agents.list().catch(() => null)
         ]);
 
-        if (callsData && Array.isArray(callsData) && callsData.length > 0) {
+        if (callsData && Array.isArray(callsData)) {
           setCalls(callsData);
-          if (!selectedCall) setSelectedCall(callsData[0]);
+          if (callsData.length > 0 && !selectedCall) {
+            setSelectedCall(callsData[0]);
+          }
         }
         if (agentsData && Array.isArray(agentsData)) setAgents(agentsData);
       } catch (err) {
@@ -128,30 +65,19 @@ export default function CallsPage() {
     e.preventDefault();
     setDispatching(true);
     try {
-      const res = await AurisAPI.calls.dispatch(dispatchAgentId, targetPhone, { source: 'Frontend Simulator' });
-      setCalls([res, ...calls]);
-      setSelectedCall(res);
+      await AurisAPI.calls.dispatch(dispatchAgentId, targetPhone, { source: 'Frontend Simulator' });
       setShowDispatchModal(false);
+      // Reload calls
+      const callsRes = await AurisAPI.calls.list(selectedAgentFilter || undefined, 50).catch(() => null);
+      if (callsRes && Array.isArray(callsRes)) {
+        setCalls(callsRes);
+        if (callsRes.length > 0) {
+          setSelectedCall(callsRes[0]);
+        }
+      }
     } catch (err) {
-      console.warn('Backend dispatch offline, simulating live call entry:', err);
-      const targetAgent = agents.find((a) => a.id === dispatchAgentId) || { id: 1, name: 'Inbound Reception & Lead Gen Specialist' };
-      const simulated: CallRun = {
-        id: Date.now(),
-        agent_id: targetAgent.id,
-        customer_number: targetPhone,
-        agent_number: '+1 (830) 555-0101',
-        direction: 'outbound',
-        status: 'in-progress',
-        duration_seconds: 12,
-        summary: `Live conversational session initiated with ${targetAgent.name}. Audio processing downsampled to 16kHz PCM.`,
-        sentiment: 'Positive',
-        key_topics: ['Live Dispatch', 'WebRTC / SIP'],
-        task_completed: false,
-        created_at: 'Just now'
-      };
-      setCalls([simulated, ...calls]);
-      setSelectedCall(simulated);
-      setShowDispatchModal(false);
+      console.warn('Dispatch failed:', err);
+      alert('Failed to dispatch call. Please verify your telephony configs and live database connection.');
     } finally {
       setDispatching(false);
     }
@@ -209,57 +135,67 @@ export default function CallsPage() {
         {/* Main Viewport: Calls List + Transcript Inspector */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left Feed */}
-          <div className="lg:col-span-5 space-y-3 max-h-[680px] overflow-y-auto pr-1">
-            {calls.map((call) => {
-              const isSelected = selectedCall?.id === call.id;
-              return (
-                <div
-                  key={call.id}
-                  onClick={() => setSelectedCall(call)}
-                  className={`p-4 rounded-2xl cursor-pointer transition-all border flex flex-col justify-between space-y-3 ${
-                    isSelected
-                      ? 'bg-slate-900/95 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.25)] font-semibold'
-                      : 'bg-slate-900/50 hover:bg-slate-900/80 border-slate-800/80 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
-                        call.direction === 'inbound' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+          <div className="lg:col-span-5 space-y-4 max-h-[calc(100vh-12rem)] overflow-y-auto pr-2">
+            {calls.length === 0 ? (
+              <div className="text-center py-12 rounded-3xl bg-slate-900/20 border border-dashed border-slate-800/80">
+                <PhoneCall className="w-8 h-8 text-slate-600 mx-auto mb-3 animate-pulse" />
+                <p className="text-sm font-semibold text-slate-400">No recent call runs found</p>
+                <p className="text-xs text-slate-500 mt-1">Initiate a live run to view telephonic logs here.</p>
+              </div>
+            ) : (
+              calls.map((call) => {
+                const isSelected = selectedCall?.id === call.id;
+                return (
+                  <div
+                    key={call.id}
+                    onClick={() => setSelectedCall(call)}
+                    className={`p-4 rounded-3xl border transition-all cursor-pointer flex flex-col gap-3 ${
+                      isSelected
+                        ? 'bg-gradient-to-r from-indigo-600/20 to-cyan-500/10 border-indigo-500/50 shadow-md shadow-indigo-500/10'
+                        : 'bg-slate-900/50 hover:bg-slate-900/80 border-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                          call.direction === 'inbound'
+                            ? 'bg-emerald-500/10 text-emerald-400'
+                            : 'bg-indigo-500/10 text-indigo-400'
+                        }`}>
+                          {call.direction === 'inbound' ? 'IN' : 'OUT'}
+                        </div>
+                        <div>
+                          <p className="text-sm font-extrabold text-white leading-tight">{call.customer_number}</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">Agent Trunk: {call.agent_number}</p>
+                        </div>
+                      </div>
+
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                        call.status === 'completed'
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : call.status === 'voicemail'
+                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse'
                       }`}>
-                        {call.direction === 'inbound' ? 'IN' : 'OUT'}
-                      </div>
-                      <div>
-                        <p className="text-sm font-extrabold text-white leading-tight">{call.customer_number}</p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Agent Trunk: {call.agent_number}</p>
-                      </div>
+                        {call.status}
+                      </span>
                     </div>
 
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                      call.status === 'completed'
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        : call.status === 'voicemail'
-                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                        : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse'
-                    }`}>
-                      {call.status}
-                    </span>
-                  </div>
+                    <p className="text-xs text-slate-300 line-clamp-2 font-normal">{call.summary || 'Active session...'}</p>
 
-                  <p className="text-xs text-slate-300 line-clamp-2 font-normal">{call.summary || 'Active session...'}</p>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-[11px] text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-slate-500" />
-                      {call.duration_seconds ? `${call.duration_seconds}s` : 'Active'}
-                    </span>
-                    {call.sentiment && (
-                      <span className="font-bold text-cyan-300">Sentiment: {call.sentiment}</span>
-                    )}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-[11px] text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-slate-500" />
+                        {call.duration_seconds ? `${call.duration_seconds}s` : 'Active'}
+                      </span>
+                      {call.sentiment && (
+                        <span className="font-bold text-cyan-300">Sentiment: {call.sentiment}</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
 
           {/* Right Inspector & Waveform */}
@@ -350,25 +286,14 @@ export default function CallsPage() {
                     <span>Live Bidirectional Transcript Log</span>
                   </h4>
 
-                  <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
-                    {MOCK_TRANSCRIPT.map((msg, i) => (
-                      <div
-                        key={i}
-                        className={`flex flex-col p-3 rounded-2xl text-xs space-y-1 ${
-                          msg.role === 'agent'
-                            ? 'bg-indigo-950/30 border border-indigo-500/20 ml-6'
-                            : 'bg-slate-900/80 border border-slate-800 mr-6'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between font-bold">
-                          <span className={msg.role === 'agent' ? 'text-indigo-400' : 'text-cyan-400'}>
-                            {msg.role === 'agent' ? '🤖 Auris AI Specialist' : '👤 Caller Inquiry'}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono">{msg.time}</span>
-                        </div>
-                        <p className="text-slate-200 leading-relaxed font-normal">{msg.text}</p>
-                      </div>
-                    ))}
+                  <div className="flex flex-col items-center justify-center py-12 text-slate-500 border border-slate-850/50 rounded-2xl bg-slate-900/10">
+                    <FileText className="w-8 h-8 mb-2 text-slate-600 animate-pulse" />
+                    <p className="text-xs font-semibold">Transcript: {selectedCall.transcript_path ? selectedCall.transcript_path.split('/').pop() : 'No raw path stored'}</p>
+                    <p className="text-[10px] text-slate-600 mt-1 max-w-xs text-center">
+                      {selectedCall.transcript_path 
+                        ? 'The live audio transcript for this run has been archived in MinIO object storage.' 
+                        : 'No transcription text has been populated for this run yet.'}
+                    </p>
                   </div>
                 </div>
               </div>

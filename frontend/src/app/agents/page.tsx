@@ -21,51 +21,11 @@ import {
   ArrowRight
 } from 'lucide-react';
 
-const MOCK_AGENTS: Agent[] = [
-  {
-    id: 1,
-    name: 'Inbound Reception & Lead Gen Specialist',
-    model: 'gpt-4o-realtime-preview',
-    tier: 'standard',
-    system_prompt: 'You are Auris Corp front desk and sales inquiry AI. Answer technical questions using the knowledge base and qualify inbound leads for SIP trunking.',
-    voice_id: 'Alloy 16kHz',
-    language: 'en-US',
-    is_active: true,
-    temperature: 0.4,
-    max_duration_seconds: 300,
-    created_at: '2026-07-10'
-  },
-  {
-    id: 2,
-    name: 'Outbound Campaign Follow-Up Assistant',
-    model: 'gpt-4o-mini',
-    tier: 'economy',
-    system_prompt: 'Outbound sales assistant calling leads who downloaded the Auris whitepaper. Check if they need a live demo or custom price quote.',
-    voice_id: 'Echo 16kHz',
-    language: 'en-US',
-    is_active: true,
-    temperature: 0.3,
-    max_duration_seconds: 180,
-    created_at: '2026-07-11'
-  },
-  {
-    id: 3,
-    name: 'Enterprise Level 2 Technical Support Agent',
-    model: 'claude-3-5-sonnet',
-    tier: 'premium',
-    system_prompt: 'Advanced Level 2 SIP trunking and WebRTC debugging agent. Can invoke MCP tools to inspect call logs and issue immediate carrier resets.',
-    voice_id: 'Shimmer 24kHz Premium',
-    language: 'en-US',
-    is_active: false,
-    temperature: 0.2,
-    max_duration_seconds: 600,
-    created_at: '2026-07-12'
-  }
-];
+// Clean database state initialization. No mock agents definition.
 
 export default function AgentsPage() {
   const { activeOrg } = useAuth();
-  const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [showModal, setShowModal] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -79,7 +39,7 @@ export default function AgentsPage() {
     async function fetchAgents() {
       try {
         const data = await AurisAPI.agents.list();
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setAgents(data);
         }
       } catch (err) {
@@ -180,75 +140,92 @@ export default function AgentsPage() {
         </div>
 
         {/* Agents Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {agents.map((agent) => (
-            <div
-              key={agent.id}
-              className="glass-card rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden group"
+        {agents.length === 0 ? (
+          <div className="text-center py-20 rounded-3xl bg-slate-950/45 border border-dashed border-slate-800 backdrop-blur-md">
+            <Bot className="w-12 h-12 text-slate-600 mx-auto mb-4 animate-pulse" />
+            <h3 className="text-lg font-bold text-slate-300">No Voice Agents Configured</h3>
+            <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+              Create your first voice agent using the form to configure dialer tiering, LLM temperature, and system prompt.
+            </p>
+            <button
+              onClick={() => setShowModal(true)}
+              className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 font-bold text-xs transition-all cursor-pointer"
             >
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-lg group-hover:scale-105 transition-transform">
-                      <Bot className="w-6 h-6" />
+              <Plus className="w-4 h-4 text-cyan-400" />
+              <span>Create Voice Agent</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {agents.map((agent) => (
+              <div
+                key={agent.id}
+                className="glass-card rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden group"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-lg group-hover:scale-105 transition-transform">
+                        <Bot className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold text-white leading-tight line-clamp-1">{agent.name}</h3>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">{agent.model}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="text-base font-bold text-white leading-tight line-clamp-1">{agent.name}</h3>
-                      <p className="text-xs text-slate-400 font-mono mt-0.5">{agent.model}</p>
-                    </div>
+
+                    <button
+                      onClick={() => toggleActive(agent.id, agent.is_active)}
+                      className={`w-10 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        agent.is_active ? 'bg-emerald-500 justify-end' : 'bg-slate-800 justify-start'
+                      }`}
+                      title={agent.is_active ? 'Active (Click to disable)' : 'Disabled (Click to enable)'}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-white shadow-md" />
+                    </button>
                   </div>
 
-                  <button
-                    onClick={() => toggleActive(agent.id, agent.is_active)}
-                    className={`w-10 h-6 flex items-center rounded-full p-1 transition-colors ${
-                      agent.is_active ? 'bg-emerald-500 justify-end' : 'bg-slate-800 justify-start'
-                    }`}
-                    title={agent.is_active ? 'Active (Click to disable)' : 'Disabled (Click to enable)'}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full border ${
+                      agent.tier === 'premium'
+                        ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
+                        : agent.tier === 'standard'
+                        ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                        : 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                    }`}>
+                      {agent.tier} Tier
+                    </span>
+                    <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                      Voice: {agent.voice_id || 'Alloy'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/50 p-3 rounded-2xl border border-slate-800/80 line-clamp-3 font-normal">
+                    {agent.system_prompt}
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                  <Link
+                    href={`/agents/${agent.id}/studio`}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-bold text-xs transition-all"
                   >
-                    <span className="w-4 h-4 rounded-full bg-white shadow-md" />
+                    <Workflow className="w-4 h-4 text-cyan-400" />
+                    <span>Workflow Studio</span>
+                  </Link>
+
+                  <button
+                    onClick={() => handleDeleteAgent(agent.id)}
+                    className="p-2.5 rounded-2xl bg-slate-900 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all"
+                    title="Delete Agent"
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full border ${
-                    agent.tier === 'premium'
-                      ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
-                      : agent.tier === 'standard'
-                      ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                      : 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
-                  }`}>
-                    {agent.tier} Tier
-                  </span>
-                  <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                    Voice: {agent.voice_id || 'Alloy'}
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/50 p-3 rounded-2xl border border-slate-800/80 line-clamp-3 font-normal">
-                  {agent.system_prompt}
-                </p>
               </div>
-
-              <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                <Link
-                  href={`/agents/${agent.id}/studio`}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-bold text-xs transition-all"
-                >
-                  <Workflow className="w-4 h-4 text-cyan-400" />
-                  <span>Workflow Studio</span>
-                </Link>
-
-                <button
-                  onClick={() => handleDeleteAgent(agent.id)}
-                  className="p-2.5 rounded-2xl bg-slate-900 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all"
-                  title="Delete Agent"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Create Agent Modal */}
         {showModal && (

@@ -20,39 +20,12 @@ import {
   DollarSign
 } from 'lucide-react';
 
-const MOCK_INVENTORY: AvailableInventoryItem[] = [
-  { id: 1, phone_number: '+1 (830) 555-0101', region: 'Texas, US (Virtual Pool)', is_leased: false, monthly_cost_usd: 2.0 },
-  { id: 2, phone_number: '+1 (830) 555-0102', region: 'Texas, US (Virtual Pool)', is_leased: false, monthly_cost_usd: 2.0 },
-  { id: 3, phone_number: '+1 (830) 982-7125', region: 'Austin, TX (Direct Inward)', is_leased: false, monthly_cost_usd: 2.5 },
-  { id: 4, phone_number: '+91 830 982-7125', region: 'Mumbai & Delhi, IN (Global DID)', is_leased: false, monthly_cost_usd: 3.0 },
-  { id: 5, phone_number: '+1 (415) 555-2671', region: 'San Francisco, CA (West Coast)', is_leased: false, monthly_cost_usd: 2.0 }
-];
-
-const MOCK_LEASED: PhoneNumber[] = [
-  {
-    id: 101,
-    phone_number: '+1 (830) 555-0199',
-    label: 'Main HQ Inbound Reception',
-    is_active: true,
-    agent_id: 1,
-    agent_name: 'Inbound Reception & Lead Gen Specialist',
-    created_at: '2026-07-10'
-  },
-  {
-    id: 102,
-    phone_number: '+1 (830) 555-0200',
-    label: 'Outbound Campaign Dialing Trunk',
-    is_active: true,
-    agent_id: 2,
-    agent_name: 'Outbound Campaign Follow-Up Assistant',
-    created_at: '2026-07-11'
-  }
-];
+// Clean database state initialization. No mock telephone numbers definition.
 
 export default function PhoneNumbersPage() {
   const { activeOrg, refreshProfile } = useAuth();
-  const [inventory, setInventory] = useState<AvailableInventoryItem[]>(MOCK_INVENTORY);
-  const [leased, setLeased] = useState<PhoneNumber[]>(MOCK_LEASED);
+  const [inventory, setInventory] = useState<AvailableInventoryItem[]>([]);
+  const [leased, setLeased] = useState<PhoneNumber[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchCode, setSearchCode] = useState('');
@@ -73,8 +46,8 @@ export default function PhoneNumbersPage() {
           AurisAPI.agents.list().catch(() => null)
         ]);
 
-        if (invData && Array.isArray(invData) && invData.length > 0) setInventory(invData);
-        if (leasedData && Array.isArray(leasedData) && leasedData.length > 0) setLeased(leasedData);
+        if (invData && Array.isArray(invData)) setInventory(invData);
+        if (leasedData && Array.isArray(leasedData)) setLeased(leasedData);
         if (agentsData && Array.isArray(agentsData)) setAgents(agentsData);
       } catch (err) {
         console.warn('Telephony load error, using fallback state:', err);
@@ -93,18 +66,8 @@ export default function PhoneNumbersPage() {
       setInventory(inventory.map((inv) => inv.id === item.id ? { ...inv, is_leased: true } : inv));
       await refreshProfile();
     } catch (err: any) {
-      console.warn('Lease failed or offline, simulating instant lease allocation:', err);
-      const simulated: PhoneNumber = {
-        id: Date.now(),
-        phone_number: item.phone_number,
-        label: `Leased from V2 Pool (${item.region})`,
-        is_active: true,
-        agent_id: 1,
-        agent_name: 'Inbound Reception & Lead Gen Specialist',
-        created_at: new Date().toISOString().split('T')[0]
-      };
-      setLeased([simulated, ...leased]);
-      setInventory(inventory.map((inv) => inv.id === item.id ? { ...inv, is_leased: true } : inv));
+      console.error('Lease failed:', err);
+      alert('Error: Could not lease the selected number. Verify that you have sufficient organization credits.');
     } finally {
       setLeasingId(null);
     }
@@ -204,57 +167,65 @@ export default function PhoneNumbersPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {leased.map((num) => (
-              <div
-                key={num.id}
-                className="p-5 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all space-y-4"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold">
-                      <PhoneCall className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-extrabold text-white tracking-tight">{num.phone_number}</h3>
-                      <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                        <Tag className="w-3 h-3 text-indigo-400" />
-                        {num.label || 'Assigned Trunk Line'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleReleaseNumber(num.id, num.phone_number)}
-                    className="p-2 rounded-xl bg-slate-950 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all text-xs flex items-center gap-1"
-                    title="Release number back to pool"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Release</span>
-                  </button>
-                </div>
-
-                {/* Agent Binding Selector */}
-                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-xs text-slate-300">
-                    <Link2 className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Route To:</span>
-                  </div>
-                  <select
-                    value={num.agent_id || ''}
-                    onChange={(e) => handleBindAgent(num.id, Number(e.target.value))}
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1 text-xs text-white font-medium focus:outline-none focus:border-cyan-400"
-                  >
-                    <option value="">-- Unassigned --</option>
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({a.tier})
-                      </option>
-                    ))}
-                    {!agents.length && <option value="1">Agent #1 — Inbound Reception</option>}
-                  </select>
-                </div>
+            {leased.length === 0 ? (
+              <div className="col-span-2 text-center py-12 rounded-3xl bg-slate-900/20 border border-dashed border-slate-800/80">
+                <Phone className="w-8 h-8 text-slate-600 mx-auto mb-3 animate-pulse" />
+                <p className="text-sm font-semibold text-slate-400">No active leased DID trunks</p>
+                <p className="text-xs text-slate-500 mt-1">Select a phone number below to lease it instantly.</p>
               </div>
-            ))}
+            ) : (
+              leased.map((num) => (
+                <div
+                  key={num.id}
+                  className="p-5 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all space-y-4"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold">
+                        <PhoneCall className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-extrabold text-white tracking-tight">{num.phone_number}</h3>
+                        <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                          <Tag className="w-3 h-3 text-indigo-400" />
+                          {num.label || 'Assigned Trunk Line'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleReleaseNumber(num.id, num.phone_number)}
+                      className="p-2 rounded-xl bg-slate-950 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all text-xs flex items-center gap-1"
+                      title="Release number back to pool"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Release</span>
+                    </button>
+                  </div>
+
+                  {/* Agent Binding Selector */}
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-xs text-slate-300">
+                      <Link2 className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Route To:</span>
+                    </div>
+                    <select
+                      value={num.agent_id || ''}
+                      onChange={(e) => handleBindAgent(num.id, Number(e.target.value))}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1 text-xs text-white font-medium focus:outline-none focus:border-cyan-400"
+                    >
+                      <option value="">-- Unassigned --</option>
+                      {agents.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.tier})
+                        </option>
+                      ))}
+                      {!agents.length && <option value="1">Agent #1 — Inbound Reception</option>}
+                    </select>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -282,44 +253,44 @@ export default function PhoneNumbersPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {unleasedPool.map((item) => (
-              <div
-                key={item.id}
-                className="p-5 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-purple-500/40 transition-all flex flex-col justify-between space-y-4 group"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-purple-400 bg-purple-500/10 px-2.5 py-1 rounded-full border border-purple-500/20">
-                      Unleased
-                    </span>
-                    <span className="text-xs font-bold text-white flex items-center gap-0.5">
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                      {item.monthly_cost_usd.toFixed(2)}/mo
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-extrabold text-white tracking-tight group-hover:text-cyan-300 transition-colors">
-                    {item.phone_number}
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
-                    <Globe className="w-3 h-3 text-slate-500" />
-                    {item.region}
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => handleLeaseNumber(item)}
-                  disabled={leasingId === item.id}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-500/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            {unleasedPool.length === 0 ? (
+              <div className="col-span-3 text-center py-12 rounded-3xl bg-slate-900/20 border border-dashed border-slate-800/80">
+                <Globe className="w-8 h-8 text-slate-600 mx-auto mb-3 animate-pulse" />
+                <p className="text-sm font-semibold text-slate-400">No available numbers in local inventory</p>
+                <p className="text-xs text-slate-500 mt-1">Click the "Seed Pool" button above to populate the pool with virtual numbers.</p>
+              </div>
+            ) : (
+              unleasedPool.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-5 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-purple-500/40 transition-all flex flex-col justify-between space-y-4 group"
                 >
-                  <Zap className="w-3.5 h-3.5 animate-pulse" />
-                  <span>{leasingId === item.id ? 'Allocating & Deducting...' : 'Lease Number (160 Credits)'}</span>
-                </button>
-              </div>
-            ))}
-            {unleasedPool.length === 0 && (
-              <div className="col-span-full text-center py-12 text-slate-500 text-xs">
-                No unleased phone numbers match area code filter &ldquo;{searchCode}&rdquo;. Try clicking &ldquo;Seed Bulk Inventory&rdquo; above.
-              </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-purple-400 bg-purple-500/10 px-2.5 py-1 rounded-full border border-purple-500/20">
+                        Unleased
+                      </span>
+                      <span className="text-xs font-bold text-white flex items-center gap-0.5">
+                        <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                        {item.monthly_cost_usd.toFixed(2)}/mo
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-extrabold text-white tracking-tight group-hover:text-cyan-300 transition-colors">
+                      {item.phone_number}
+                    </h3>
+                    <p className="text-xs text-slate-400 font-medium mt-1">{item.region}</p>
+                  </div>
+
+                  <button
+                    onClick={() => handleLeaseNumber(item)}
+                    disabled={leasingId !== null}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-purple-600/25 border border-purple-500/35 hover:bg-purple-600/40 text-purple-300 text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{leasingId === item.id ? 'Leasing DID...' : 'Lease Instant DID'}</span>
+                  </button>
+                </div>
+              ))
             )}
           </div>
         </div>

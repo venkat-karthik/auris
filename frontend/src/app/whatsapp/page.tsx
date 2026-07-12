@@ -33,7 +33,7 @@ interface WhatsAppLog {
   timestamp: string;
 }
 
-const MOCK_TEMPLATES: WhatsAppTemplate[] = [
+const SYSTEM_TEMPLATES: WhatsAppTemplate[] = [
   {
     id: 1,
     name: 'post_call_summary_v1',
@@ -57,16 +57,12 @@ const MOCK_TEMPLATES: WhatsAppTemplate[] = [
   }
 ];
 
-const MOCK_LOGS: WhatsAppLog[] = [
-  { id: 401, recipient: '+1 (830) 982-7125', template: 'post_call_summary_v1', status: 'read', timestamp: '2 mins ago' },
-  { id: 402, recipient: '+1 (415) 888-9900', template: 'voicemail_callback_alert', status: 'delivered', timestamp: '45 mins ago' },
-  { id: 403, recipient: '+91 98765 43210', template: 'sip_trunk_onboarding_link', status: 'sent', timestamp: '1 hour ago' }
-];
+// Clean database state initialization. No mock logs definition.
 
 export default function WhatsAppPage() {
   const { activeOrg } = useAuth();
-  const [templates, setTemplates] = useState<WhatsAppTemplate[]>(MOCK_TEMPLATES);
-  const [logs, setLogs] = useState<WhatsAppLog[]>(MOCK_LOGS);
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>(SYSTEM_TEMPLATES);
+  const [logs, setLogs] = useState<WhatsAppLog[]>([]);
   const [sending, setSending] = useState(false);
   const [targetPhone, setTargetPhone] = useState('+1 (830) 982-7125');
   const [selectedTemplate, setSelectedTemplate] = useState('post_call_summary_v1');
@@ -206,22 +202,28 @@ export default function WhatsAppPage() {
           </h3>
 
           <div className="space-y-2">
-            {logs.map((log) => (
-              <div key={log.id} className="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-3">
-                  <span className="font-bold text-white">{log.recipient}</span>
-                  <span className="text-slate-400">Template: <strong className="text-cyan-300">{log.template}</strong></span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-slate-500 font-mono">{log.timestamp}</span>
-                  <span className={`font-bold uppercase px-2 py-0.5 rounded text-[10px] ${
-                    log.status === 'read' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-300'
-                  }`}>
-                    {log.status}
-                  </span>
-                </div>
+            {logs.length === 0 ? (
+              <div className="text-center py-8 rounded-2xl bg-slate-900/20 border border-dashed border-slate-800/80 text-slate-500 text-xs font-semibold">
+                No WhatsApp notifications triggered in this session.
               </div>
-            ))}
+            ) : (
+              logs.map((log) => (
+                <div key={log.id} className="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-white">{log.recipient}</span>
+                    <span className="text-slate-400">Template: <strong className="text-cyan-300">{log.template}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-slate-500 font-mono">{log.timestamp}</span>
+                    <span className={`font-bold uppercase px-2 py-0.5 rounded text-[10px] ${
+                      log.status === 'read' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {log.status}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

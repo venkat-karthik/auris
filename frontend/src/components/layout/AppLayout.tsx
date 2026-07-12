@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import {
   LayoutDashboard,
@@ -59,9 +59,31 @@ const NAV_GROUPS = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, activeOrg, organizations, selectOrganization, logout } = useAuth();
+  const router = useRouter();
+  const { user, activeOrg, organizations, selectOrganization, logout, isLoading } = useAuth();
   const [showOrgDropdown, setShowOrgDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, isLoading, router]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#080a0f] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="w-12 h-12 rounded-full border-4 border-t-indigo-500 border-slate-800 animate-spin" />
+          <span className="text-slate-400 text-sm font-semibold tracking-wide">Resolving Security Session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#080a0f] text-slate-100">

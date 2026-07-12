@@ -35,9 +35,9 @@ apiClient.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('auris_token');
-        // If user is currently stuck on the non-existent /login page, redirect them to home
-        if (window.location.pathname.startsWith('/login')) {
-          window.location.href = '/';
+        localStorage.removeItem('auris_org_id');
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login';
         }
       }
     }
@@ -149,6 +149,10 @@ export const AurisAPI = {
     },
     me: async () => {
       const res = await apiClient.get('/auth/me');
+      return res.data;
+    },
+    verify: async (email: string, code: string) => {
+      const res = await apiClient.post('/auth/verify', { email, code });
       return res.data;
     }
   },

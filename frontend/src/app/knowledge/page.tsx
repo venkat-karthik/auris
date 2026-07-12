@@ -29,37 +29,11 @@ interface KnowledgeDoc {
   created_at: string;
 }
 
-const MOCK_DOCS: KnowledgeDoc[] = [
-  {
-    id: 1,
-    title: 'Auris Architecture & Sub-300ms Telephony Whitepaper.pdf',
-    source_type: 'file',
-    chunk_count: 42,
-    status: 'indexed',
-    created_at: '2026-07-10'
-  },
-  {
-    id: 2,
-    title: 'Enterprise SIP Trunking Configuration & Rate Centers.md',
-    source_type: 'file',
-    chunk_count: 18,
-    status: 'indexed',
-    created_at: '2026-07-11'
-  },
-  {
-    id: 3,
-    title: 'https://docs.telnyx.com/webrtc/bidirectional-audio',
-    source_type: 'url',
-    source_url: 'https://docs.telnyx.com/webrtc/bidirectional-audio',
-    chunk_count: 27,
-    status: 'indexed',
-    created_at: '2026-07-12'
-  }
-];
+// Clean database state initialization. No mock documents definition.
 
 export default function KnowledgePage() {
   const { activeOrg } = useAuth();
-  const [docs, setDocs] = useState<KnowledgeDoc[]>(MOCK_DOCS);
+  const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [loading, setLoading] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [scraping, setScraping] = useState(false);
@@ -69,7 +43,7 @@ export default function KnowledgePage() {
     async function loadDocs() {
       try {
         const res = await AurisAPI.knowledge.list();
-        if (Array.isArray(res) && res.length > 0) setDocs(res);
+        if (Array.isArray(res)) setDocs(res);
       } catch (err) {
         console.warn('Backend KB fetch error:', err);
       }
@@ -86,18 +60,8 @@ export default function KnowledgePage() {
       setDocs([added, ...docs]);
       setUrlInput('');
     } catch (err) {
-      console.warn('Scrape API offline or timeout, simulating indexed URL item:', err);
-      const simulated: KnowledgeDoc = {
-        id: Date.now(),
-        title: urlInput,
-        source_type: 'url',
-        source_url: urlInput,
-        chunk_count: 24,
-        status: 'indexed',
-        created_at: new Date().toISOString().split('T')[0]
-      };
-      setDocs([simulated, ...docs]);
-      setUrlInput('');
+      console.error('Scrape error:', err);
+      alert('Failed to ingest URL. Please verify your backend server connection.');
     } finally {
       setScraping(false);
     }
@@ -111,16 +75,8 @@ export default function KnowledgePage() {
       const added = await AurisAPI.knowledge.uploadFile(file);
       setDocs([added, ...docs]);
     } catch (err) {
-      console.warn('File upload API offline, simulating file chunking & pgvector embedding:', err);
-      const simulated: KnowledgeDoc = {
-        id: Date.now(),
-        title: file.name,
-        source_type: 'file',
-        chunk_count: Math.max(12, Math.floor(file.size / 1024)),
-        status: 'indexed',
-        created_at: new Date().toISOString().split('T')[0]
-      };
-      setDocs([simulated, ...docs]);
+      console.error('File upload error:', err);
+      alert('Failed to upload file. Check if your backend server is active.');
     } finally {
       setUploading(false);
     }
@@ -243,41 +199,49 @@ export default function KnowledgePage() {
           </div>
 
           <div className="space-y-3">
-            {docs.map((doc) => (
-              <div
-                key={doc.id}
-                className="p-4 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold ${
-                    doc.source_type === 'file' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                  }`}>
-                    {doc.source_type === 'file' ? <FileText className="w-5 h-5" /> : <Globe className="w-5 h-5" />}
-                  </div>
+            {docs.length === 0 ? (
+              <div className="text-center py-12 rounded-2xl bg-slate-900/20 border border-dashed border-slate-800/80">
+                <Database className="w-8 h-8 text-slate-600 mx-auto mb-3 animate-pulse" />
+                <p className="text-sm font-semibold text-slate-400">No vector documents indexed</p>
+                <p className="text-xs text-slate-500 mt-1">Upload a PDF/Word file or input a URL above to chunk and index semantic content.</p>
+              </div>
+            ) : (
+              docs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="p-4 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold ${
+                      doc.source_type === 'file' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                    }`}>
+                      {doc.source_type === 'file' ? <FileText className="w-5 h-5" /> : <Globe className="w-5 h-5" />}
+                    </div>
 
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-white truncate">{doc.title}</h4>
-                    <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                      <span className="font-semibold text-cyan-300">{doc.chunk_count} Vector Chunks</span>
-                      <span>•</span>
-                      <span>Indexed on {doc.created_at}</span>
-                      <span>•</span>
-                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> {doc.status}
-                      </span>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-white truncate">{doc.title}</h4>
+                      <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                        <span className="font-semibold text-cyan-300">{doc.chunk_count} Vector Chunks</span>
+                        <span>•</span>
+                        <span>Indexed on {doc.created_at}</span>
+                        <span>•</span>
+                        <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> {doc.status}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <button
-                  onClick={() => handleDelete(doc.id)}
-                  className="p-2.5 rounded-xl bg-slate-950 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all flex-shrink-0"
-                  title="Delete Embedding"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+                  <button
+                    onClick={() => handleDelete(doc.id)}
+                    className="p-2.5 rounded-xl bg-slate-950 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all flex-shrink-0"
+                    title="Delete Embedding"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

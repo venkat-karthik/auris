@@ -25,33 +25,11 @@ interface Transaction {
   created_at: string;
 }
 
-const MOCK_TRANSACTIONS: Transaction[] = [
-  {
-    id: 901,
-    description: 'Lease Local DID +1 (830) 555-0199 from V2 AvailableInventory',
-    amount_credits: -160.0,
-    type: 'debit',
-    created_at: '2026-07-12 10:14:00'
-  },
-  {
-    id: 902,
-    description: 'Outbound Dialing Campaign Batch #201 (142 completed calls)',
-    amount_credits: -142.0,
-    type: 'debit',
-    created_at: '2026-07-11 16:30:00'
-  },
-  {
-    id: 903,
-    description: 'Razorpay Instant Credit Top-Up (Order id_rzp_demo_830982)',
-    amount_credits: +5000.0,
-    type: 'credit',
-    created_at: '2026-07-10 09:00:00'
-  }
-];
+// Clean database state initialization. No mock transactions definition.
 
 export default function BillingPage() {
   const { activeOrg, refreshProfile } = useAuth();
-  const [transactions, setTransactions] = useState<Transaction[]>(MOCK_TRANSACTIONS);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [purchasing, setPurchasing] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -59,7 +37,7 @@ export default function BillingPage() {
     async function loadTransactions() {
       try {
         const res = await AurisAPI.billing.listTransactions();
-        if (Array.isArray(res) && res.length > 0) setTransactions(res);
+        if (Array.isArray(res)) setTransactions(res);
       } catch (err) {
         console.warn('Billing API ledger error:', err);
       }
@@ -234,30 +212,38 @@ export default function BillingPage() {
           </div>
 
           <div className="space-y-3">
-            {transactions.map((tx) => (
-              <div
-                key={tx.id}
-                className="p-4 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-3.5">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-extrabold text-sm ${
-                    tx.type === 'credit' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                  }`}>
-                    {tx.type === 'credit' ? '+' : '-'}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white">{tx.description}</h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">{tx.created_at}</p>
-                  </div>
-                </div>
-
-                <div className={`text-sm font-extrabold font-mono ${
-                  tx.type === 'credit' ? 'text-emerald-400' : 'text-slate-300'
-                }`}>
-                  {tx.type === 'credit' ? `+${tx.amount_credits.toFixed(1)}` : `${tx.amount_credits.toFixed(1)}`} Credits
-                </div>
+            {transactions.length === 0 ? (
+              <div className="text-center py-12 rounded-2xl bg-slate-900/20 border border-dashed border-slate-800/80">
+                <History className="w-8 h-8 text-slate-600 mx-auto mb-3 animate-pulse" />
+                <p className="text-sm font-semibold text-slate-400">No transactions recorded yet</p>
+                <p className="text-xs text-slate-500 mt-1">Deductions and credit top-ups will be logged in this ledger dynamically.</p>
               </div>
-            ))}
+            ) : (
+              transactions.map((tx) => (
+                <div
+                  key={tx.id}
+                  className="p-4 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-extrabold text-sm ${
+                      tx.type === 'credit' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                    }`}>
+                      {tx.type === 'credit' ? '+' : '-'}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">{tx.description}</h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{tx.created_at}</p>
+                    </div>
+                  </div>
+
+                  <div className={`text-sm font-extrabold font-mono ${
+                    tx.type === 'credit' ? 'text-emerald-400' : 'text-slate-300'
+                  }`}>
+                    {tx.type === 'credit' ? `+${tx.amount_credits.toFixed(1)}` : `${tx.amount_credits.toFixed(1)}`} Credits
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

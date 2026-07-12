@@ -35,74 +35,18 @@ import {
   Layers
 } from 'lucide-react';
 
-const MOCK_RECENT_CALLS: CallRun[] = [
-  {
-    id: 1042,
-    agent_id: 1,
-    customer_number: '+1 (830) 982-7125',
-    agent_number: '+1 (830) 555-0101',
-    direction: 'inbound',
-    status: 'completed',
-    duration_seconds: 142,
-    summary: 'Customer called to inquire about enterprise SIP trunking setup and local DID pre-purchased pool pricing. Agent scheduled technical onboarding session.',
-    sentiment: 'Positive',
-    key_topics: ['SIP Trunking', 'DID Inventory', 'Enterprise Pricing'],
-    task_completed: true,
-    created_at: '2 mins ago'
-  },
-  {
-    id: 1041,
-    agent_id: 2,
-    customer_number: '+91 98765 43210',
-    agent_number: '+1 (830) 555-0102',
-    direction: 'outbound',
-    status: 'completed',
-    duration_seconds: 88,
-    summary: 'Outbound campaign follow-up for Razorpay credit bundle top-up. Customer agreed to 5,000 credit tier.',
-    sentiment: 'Neutral',
-    key_topics: ['Billing', 'Credit Top-Up'],
-    task_completed: true,
-    created_at: '14 mins ago'
-  },
-  {
-    id: 1040,
-    agent_id: 1,
-    customer_number: '+1 (415) 888-9900',
-    agent_number: '+1 (830) 555-0101',
-    direction: 'inbound',
-    status: 'voicemail',
-    duration_seconds: 34,
-    summary: 'Voicemail detected during greeting. System recorded message and triggered WhatsApp follow-up template.',
-    sentiment: 'Neutral',
-    key_topics: ['Voicemail Detected', 'WhatsApp Triggered'],
-    task_completed: false,
-    created_at: '45 mins ago'
-  },
-  {
-    id: 1039,
-    agent_id: 3,
-    customer_number: '+1 (650) 222-3344',
-    agent_number: '+1 (830) 555-0101',
-    direction: 'web',
-    status: 'completed',
-    duration_seconds: 215,
-    summary: 'WebRTC browser voice test exploring React Flow visual node execution and mid-call supervisor takeover.',
-    sentiment: 'Positive',
-    key_topics: ['Visual Studio', 'WebRTC Test'],
-    task_completed: true,
-    created_at: '1 hour ago'
-  }
-];
+// Clean database state initialization. No mock calls definition.
 
 export default function DashboardPage() {
   const { user, activeOrg, isLoading } = useAuth();
-  const [agentsCount, setAgentsCount] = useState<number>(4);
-  const [inventoryCount, setInventoryCount] = useState<number>(12);
-  const [calls, setCalls] = useState<CallRun[]>(MOCK_RECENT_CALLS);
+  const [agentsCount, setAgentsCount] = useState<number>(0);
+  const [inventoryCount, setInventoryCount] = useState<number>(0);
+  const [calls, setCalls] = useState<CallRun[]>([]);
   const [fetching, setFetching] = useState<boolean>(true);
 
   useEffect(() => {
     async function loadDashboardData() {
+      if (!activeOrg) return;
       try {
         const [agentsRes, invRes, callsRes] = await Promise.all([
           AurisAPI.agents.list().catch(() => null),
@@ -112,11 +56,11 @@ export default function DashboardPage() {
 
         if (agentsRes && Array.isArray(agentsRes)) setAgentsCount(agentsRes.length);
         if (invRes && Array.isArray(invRes)) setInventoryCount(invRes.length);
-        if (callsRes && Array.isArray(callsRes) && callsRes.length > 0) {
+        if (callsRes && Array.isArray(callsRes)) {
           setCalls(callsRes);
         }
       } catch (err) {
-        console.warn('Dashboard fetch error (using fallback mocks):', err);
+        console.warn('Dashboard fetch error:', err);
       } finally {
         setFetching(false);
       }
@@ -432,81 +376,89 @@ export default function DashboardPage() {
           </div>
 
           <div className="space-y-3">
-            {calls.map((call) => (
-              <div
-                key={call.id}
-                className="p-4 rounded-2xl bg-slate-900/50 hover:bg-slate-900/80 border border-slate-800/80 hover:border-slate-700 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
-              >
-                <div className="flex items-start gap-3.5">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                    call.status === 'completed'
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      : call.status === 'voicemail'
-                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                      : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
-                  }`}>
-                    <PhoneCall className="w-5 h-5" />
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold text-white">{call.customer_number}</span>
-                      <span className="text-xs text-slate-400">via {call.agent_number}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                        call.status === 'completed'
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : call.status === 'voicemail'
-                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                          : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse'
-                      }`}>
-                        {call.status}
-                      </span>
-                      <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {call.duration_seconds ? `${call.duration_seconds}s` : 'Active'}
-                      </span>
+            {calls.length === 0 ? (
+              <div className="text-center py-12 rounded-2xl bg-slate-900/20 border border-dashed border-slate-800/80">
+                <PhoneCall className="w-8 h-8 text-slate-600 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-slate-400">No recent call runs found</p>
+                <p className="text-xs text-slate-500 mt-1">Initiate a live run to view telephonic logs here.</p>
+              </div>
+            ) : (
+              calls.map((call) => (
+                <div
+                  key={call.id}
+                  className="p-4 rounded-2xl bg-slate-900/50 hover:bg-slate-900/80 border border-slate-800/80 hover:border-slate-700 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
+                >
+                  <div className="flex items-start gap-3.5">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                      call.status === 'completed'
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : call.status === 'voicemail'
+                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                    }`}>
+                      <PhoneCall className="w-5 h-5" />
                     </div>
 
-                    <p className="text-xs text-slate-300 line-clamp-2 max-w-3xl">
-                      {call.summary || 'Call in progress or no summary generated yet.'}
-                    </p>
-
-                    {call.key_topics && call.key_topics.length > 0 && (
-                      <div className="flex items-center gap-1.5 pt-1 flex-wrap">
-                        {call.key_topics.map((topic, i) => (
-                          <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-slate-800 text-cyan-300 border border-slate-700/60">
-                            #{topic}
-                          </span>
-                        ))}
-                        {call.sentiment && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg ${
-                            call.sentiment.toLowerCase().includes('pos')
-                              ? 'bg-emerald-500/10 text-emerald-400'
-                              : 'bg-slate-800 text-slate-400'
-                          }`}>
-                            Sentiment: {call.sentiment}
-                          </span>
-                        )}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-bold text-white">{call.customer_number}</span>
+                        <span className="text-xs text-slate-400">via {call.agent_number}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                          call.status === 'completed'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : call.status === 'voicemail'
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse'
+                        }`}>
+                          {call.status}
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {call.duration_seconds ? `${call.duration_seconds}s` : 'Active'}
+                        </span>
                       </div>
-                    )}
+
+                      <p className="text-xs text-slate-300 line-clamp-2 max-w-3xl">
+                        {call.summary || 'Call in progress or no summary generated yet.'}
+                      </p>
+
+                      {call.key_topics && call.key_topics.length > 0 && (
+                        <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                          {call.key_topics.map((topic, i) => (
+                            <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-slate-800 text-cyan-300 border border-slate-700/60">
+                              #{topic}
+                            </span>
+                          ))}
+                          {call.sentiment && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg ${
+                              call.sentiment.toLowerCase().includes('pos')
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              Sentiment: {call.sentiment}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 md:self-center">
+                    <button className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition-all flex items-center gap-1.5">
+                      <Play className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Audio Waveform</span>
+                    </button>
+                    <Link
+                      href={`/calls`}
+                      className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-all"
+                      title="Inspect Details"
+                    >
+                      <ArrowUpRight className="w-4 h-4" />
+                    </Link>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 md:self-center">
-                  <button className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition-all flex items-center gap-1.5">
-                    <Play className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Audio Waveform</span>
-                  </button>
-                  <Link
-                    href={`/calls`}
-                    className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-all"
-                    title="Inspect Details"
-                  >
-                    <ArrowUpRight className="w-4 h-4" />
-                  </Link>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

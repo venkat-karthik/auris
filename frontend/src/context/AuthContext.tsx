@@ -16,21 +16,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const DEMO_ORG: Organization = {
-  id: 1,
-  name: 'Auris Corp (Demo Org)',
-  slug: 'auris-corp-demo',
-  balance_credits: 485.0,
-  api_key: 'ak_live_8309827125_demo'
-};
-
-const DEMO_USER: UserProfile = {
-  id: 1,
-  email: 'venkat@auris.ai',
-  full_name: 'Venkat Karthik',
-  is_verified: true,
-  selected_org_id: 1
-};
+// No default mock user or organization to ensure database connection exclusively.
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -42,10 +28,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('auris_token') : null;
       if (!token) {
-        // Default to demo/dev state if no active token
-        setUser(DEMO_USER);
-        setOrganizations([DEMO_ORG]);
-        setActiveOrg(DEMO_ORG);
+        setUser(null);
+        setOrganizations([]);
+        setActiveOrg(null);
         setIsLoading(false);
         return;
       }
@@ -57,16 +42,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setOrganizations(orgsData);
 
       const savedOrgId = typeof window !== 'undefined' ? localStorage.getItem('auris_org_id') : null;
-      const currentOrg = orgsData.find((o: Organization) => String(o.id) === savedOrgId) || orgsData[0] || DEMO_ORG;
+      const currentOrg = orgsData.find((o: Organization) => String(o.id) === savedOrgId) || orgsData[0] || null;
       setActiveOrg(currentOrg);
       if (typeof window !== 'undefined' && currentOrg) {
         localStorage.setItem('auris_org_id', String(currentOrg.id));
       }
     } catch (err) {
-      console.warn('Backend connection unavailable or token expired, falling back to local demo state:', err);
-      setUser(DEMO_USER);
-      setOrganizations([DEMO_ORG]);
-      setActiveOrg(DEMO_ORG);
+      console.warn('Backend connection unavailable or token expired:', err);
+      setUser(null);
+      setOrganizations([]);
+      setActiveOrg(null);
     } finally {
       setIsLoading(false);
     }
@@ -90,10 +75,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auris_token');
       localStorage.removeItem('auris_org_id');
+      window.location.href = '/login';
     }
-    setUser(DEMO_USER);
-    setOrganizations([DEMO_ORG]);
-    setActiveOrg(DEMO_ORG);
+    setUser(null);
+    setOrganizations([]);
+    setActiveOrg(null);
   };
 
   const selectOrganization = (org: Organization) => {

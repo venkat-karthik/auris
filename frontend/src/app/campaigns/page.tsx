@@ -20,42 +20,11 @@ import {
   PhoneCall
 } from 'lucide-react';
 
-const MOCK_CAMPAIGNS: Campaign[] = [
-  {
-    id: 201,
-    name: 'Q3 Enterprise Lead Nurture & SIP Upsell',
-    agent_id: 2,
-    status: 'running',
-    total_contacts: 250,
-    completed_calls: 142,
-    successful_calls: 118,
-    created_at: '2026-07-11'
-  },
-  {
-    id: 202,
-    name: 'Razorpay Credit Bundle Reactivation Blast',
-    agent_id: 1,
-    status: 'completed',
-    total_contacts: 85,
-    completed_calls: 85,
-    successful_calls: 79,
-    created_at: '2026-07-10'
-  },
-  {
-    id: 203,
-    name: 'West Coast DID Pool Announcement Dialout',
-    agent_id: 2,
-    status: 'paused',
-    total_contacts: 500,
-    completed_calls: 40,
-    successful_calls: 36,
-    created_at: '2026-07-12'
-  }
-];
+// Clean database state initialization. No mock campaigns definition.
 
 export default function CampaignsPage() {
   const { activeOrg } = useAuth();
-  const [campaigns, setCampaigns] = useState<Campaign[]>(MOCK_CAMPAIGNS);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -73,7 +42,7 @@ export default function CampaignsPage() {
           AurisAPI.agents.list().catch(() => null)
         ]);
 
-        if (campRes && Array.isArray(campRes) && campRes.length > 0) setCampaigns(campRes);
+        if (campRes && Array.isArray(campRes)) setCampaigns(campRes);
         if (agentsRes && Array.isArray(agentsRes)) setAgents(agentsRes);
       } catch (err) {
         console.warn('Campaigns load error:', err);
@@ -158,36 +127,6 @@ export default function CampaignsPage() {
         </div>
 
         {/* Campaigns Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {campaigns.map((camp) => {
-            const progress = camp.total_contacts > 0 ? Math.round((camp.completed_calls / camp.total_contacts) * 100) : 0;
-            return (
-              <div
-                key={camp.id}
-                className="glass-card rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden group"
-              >
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full border ${
-                        camp.status === 'running'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse'
-                          : camp.status === 'completed'
-                          ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                          : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                      }`}>
-                        {camp.status}
-                      </span>
-                      <h3 className="text-base font-bold text-white mt-2 leading-tight">{camp.name}</h3>
-                    </div>
-
-                    <div className="w-10 h-10 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-cyan-400 font-bold text-xs">
-                      {progress}%
-                    </div>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
                       <span>Dialed: <strong className="text-white">{camp.completed_calls}</strong> / {camp.total_contacts}</span>
                       <span>Success: <strong className="text-emerald-400">{camp.successful_calls}</strong></span>

@@ -25,15 +25,11 @@ interface ClonedVoice {
   created_at: string;
 }
 
-const MOCK_VOICES: ClonedVoice[] = [
-  { id: 1, name: 'Venkat Custom Indian English (16kHz)', status: 'ready', created_at: '2026-07-10' },
-  { id: 2, name: 'Support Specialist Female Warm (24kHz)', status: 'ready', created_at: '2026-07-11' },
-  { id: 3, name: 'Executive Pitch Assistant Male', status: 'ready', created_at: '2026-07-12' }
-];
+// Clean database state initialization. No mock voices definition.
 
 export default function ClonedVoicesPage() {
   const { activeOrg } = useAuth();
-  const [voices, setVoices] = useState<ClonedVoice[]>(MOCK_VOICES);
+  const [voices, setVoices] = useState<ClonedVoice[]>([]);
   const [uploading, setUploading] = useState(false);
   const [nameInput, setNameInput] = useState('');
 
@@ -41,7 +37,7 @@ export default function ClonedVoicesPage() {
     async function loadVoices() {
       try {
         const res = await AurisAPI.clonedVoices.list();
-        if (Array.isArray(res) && res.length > 0) setVoices(res);
+        if (Array.isArray(res)) setVoices(res);
       } catch (err) {
         console.warn('Voices load error:', err);
       }
@@ -124,34 +120,47 @@ export default function ClonedVoicesPage() {
             <span>Available Cloned Voices ({voices.length})</span>
           </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {voices.map((v) => (
-              <div key={v.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/30 uppercase">
-                      {v.status}
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-mono">{v.created_at}</span>
+          {voices.length === 0 ? (
+            <div className="text-center py-12 rounded-2xl bg-slate-900/20 border border-dashed border-slate-800/80">
+              <Mic className="w-8 h-8 text-slate-600 mx-auto mb-3 animate-pulse" />
+              <p className="text-sm font-semibold text-slate-400">No cloned voices found</p>
+              <p className="text-xs text-slate-500 mt-1">Upload a short audio sample above to create a synthetic voice.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {voices.map((v) => (
+                <div key={v.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/30 uppercase">
+                        {v.status}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">{v.created_at}</span>
+                    </div>
+                    <h4 className="text-sm font-extrabold text-white">{v.name}</h4>
                   </div>
-                  <h4 className="text-sm font-extrabold text-white">{v.name}</h4>
-                </div>
 
                 <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
                   <button className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all">
                     <Play className="w-3.5 h-3.5" />
                     <span>Test Audio</span>
                   </button>
-                  <button
-                    onClick={() => setVoices(voices.filter((voice) => voice.id !== v.id))}
-                    className="p-2 rounded-xl bg-slate-950 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                    <button className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all">
+                      <Play className="w-3.5 h-3.5" />
+                      <span>Test Audio</span>
+                    </button>
+                    <button
+                      onClick={() => setVoices(voices.filter((voice) => voice.id !== v.id))}
+                      className="p-2 rounded-xl bg-slate-950 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </AppLayout>
