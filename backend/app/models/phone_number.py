@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -19,3 +19,14 @@ class PhoneNumber(Base):
 
     agent = relationship("Agent")
     org = relationship("Organization", back_populates="phone_numbers")
+
+
+class AvailableInventory(Base):
+    __tablename__ = "available_inventory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    phone_number = Column(String(length=32), unique=True, index=True, nullable=False)
+    region = Column(String(length=64), nullable=True)
+    is_leased = Column(Boolean, default=False, nullable=False)
+    monthly_cost_usd = Column(Float, default=2.00, nullable=False)
+

@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.customer_profile import CustomerProfile
 from app.models.knowledge_base import KnowledgeBaseDocument, KnowledgeBaseChunk
 from app.models.campaign import Campaign, CampaignContact
-from app.models.phone_number import PhoneNumber
+from app.models.phone_number import AvailableInventory, PhoneNumber
 from app.models.whatsapp_number import WhatsappNumber
 from app.models.integration import Integration
 from app.models.cloned_voice import ClonedVoice
@@ -29,6 +29,7 @@ __all__ = [
     "Campaign",
     "CampaignContact",
     "PhoneNumber",
+    "AvailableInventory",
     "WhatsappNumber",
     "Integration",
     "ClonedVoice",

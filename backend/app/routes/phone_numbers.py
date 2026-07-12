@@ -12,7 +12,7 @@ from app.core import config
 from app.core.database import get_db
 from app.dependencies.auth import get_current_org
 from app.models.organization import Organization
-from app.models.phone_number import PhoneNumber
+from app.models.phone_number import AvailableInventory, PhoneNumber
 from app.models.agent import Agent
 
 router = APIRouter(prefix="/phone-numbers", tags=["Phone Numbers"])
@@ -41,6 +41,21 @@ class PhoneNumberResponse(BaseModel):
     agent_id: Optional[int]
     agent_name: Optional[str]
     created_at: datetime
+
+
+class AddInventoryRequest(BaseModel):
+    phone_numbers: List[str]
+    region: Optional[str] = "United States"
+    monthly_cost_usd: float = 2.00
+
+
+class InventoryItemResponse(BaseModel):
+    id: int
+    phone_number: str
+    region: Optional[str]
+    is_leased: bool
+    monthly_cost_usd: float
+
 
 
 @router.get("", response_model=List[PhoneNumberResponse])
@@ -80,8 +95,23 @@ async def search_available_numbers(
 ):
     """
     Search available virtual numbers to purchase.
-    Queries Twilio or Telnyx API if configured; otherwise falls back to local mock data.
+    Queries local AvailableInventory pool first; falls back to Twilio/Telnyx or mock data if pool is empty.
     """
+    # 0. Check local pre-purchased inventory (V2 feature)
+    query = select(AvailableInventory).where(AvailableInventory.is_leased == False)
+    if area_code:
+        query = query.where(AvailableInventory.phone_number.like(f"%{area_code}%"))
+    result = await db.execute(query)
+    inventory_items = result.scalars().all()
+    if inventory_items:
+        return [
+            SearchNumbersResponse(
+                phone_number=item.phone_number,
+                region=item.region or "United States",
+                monthly_cost_usd=item.monthly_cost_usd
+            ) for item in inventory_items
+        ]
+
     # 1. Try Twilio search if configured
     if config.TWILIO_ACCOUNT_SID and not config.TWILIO_ACCOUNT_SID.startswith("mock"):
         try:
@@ -163,9 +193,52 @@ async def buy_phone_number(
     org: Organization = Depends(get_current_org)
 ):
     """
-    Purchase a virtual phone number.
+    Purchase or lease a virtual phone number.
     Deducts monthly cost from credits and registers number in the system.
+    If the number exists in the local pre-purchased pool (`AvailableInventory`), leases it directly.
     """
+    # Check if number is already taken in active PhoneNumbers
+    taken_res = await db.execute(select(PhoneNumber).where(PhoneNumber.phone_number == body.phone_number))
+    if taken_res.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="This phone number is already leased in the system")
+
+    # 0. Check local AvailableInventory pool first (V2 feature)
+    inv_res = await db.execute(select(AvailableInventory).where(AvailableInventory.phone_number == body.phone_number))
+    inv_item = inv_res.scalar_one_or_none()
+    if inv_item:
+        if inv_item.is_leased:
+            raise HTTPException(status_code=400, detail="This phone number from local inventory is already leased to another organization")
+        
+        cost_credits = float(inv_item.monthly_cost_usd * 80.0)
+        if org.balance_credits < cost_credits:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient balance. Leasing this number costs {cost_credits:.1f} credits (${inv_item.monthly_cost_usd:.2f} USD) monthly."
+            )
+        
+        org.balance_credits -= cost_credits
+        inv_item.is_leased = True
+        
+        num = PhoneNumber(
+            org_id=org.id,
+            phone_number=body.phone_number,
+            label=body.label or "Main Reception Line",
+            telnyx_id=f"inv_{inv_item.id}",
+            is_active=True
+        )
+        db.add(num)
+        await db.commit()
+        await db.refresh(num)
+        return PhoneNumberResponse(
+            id=num.id,
+            phone_number=num.phone_number,
+            label=num.label,
+            is_active=num.is_active,
+            agent_id=num.agent_id,
+            agent_name=None,
+            created_at=num.created_at
+        )
+
     # 1. Check if org has enough credits for first month ($2.00 = ~160 credits)
     cost_credits = 160.0
     if org.balance_credits < cost_credits:
@@ -173,11 +246,6 @@ async def buy_phone_number(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Insufficient balance. Leasing a number costs {cost_credits} credits ($2.00 USD) monthly."
         )
-
-    # 2. Check if number is already taken
-    taken_res = await db.execute(select(PhoneNumber).where(PhoneNumber.phone_number == body.phone_number))
-    if taken_res.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="This phone number is already leased in the system")
 
     # 3. Provision the number on Twilio or Telnyx if API keys are present, otherwise fall back to mock
     provider_id = None
@@ -316,8 +384,15 @@ async def release_phone_number(
     if not num:
         raise HTTPException(status_code=404, detail="Phone number not found")
 
+    # Check if number belongs to local inventory and return it to unleased pool (V2 feature)
+    inv_res = await db.execute(select(AvailableInventory).where(AvailableInventory.phone_number == num.phone_number))
+    inv_item = inv_res.scalar_one_or_none()
+    if inv_item:
+        inv_item.is_leased = False
+        logger.info(f"Released local inventory item {num.phone_number} back to unleased pool.")
+
     # Release from Twilio if it's a Twilio SID (starts with PN)
-    if num.telnyx_id and num.telnyx_id.startswith("PN") and config.TWILIO_ACCOUNT_SID and not config.TWILIO_ACCOUNT_SID.startswith("mock"):
+    elif num.telnyx_id and num.telnyx_id.startswith("PN") and config.TWILIO_ACCOUNT_SID and not config.TWILIO_ACCOUNT_SID.startswith("mock"):
         try:
             from twilio.rest import Client
             client = Client(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
@@ -341,3 +416,63 @@ async def release_phone_number(
     await db.delete(num)
     await db.commit()
     return {"status": "ok", "message": f"Successfully released phone number {num.phone_number}"}
+
+
+@router.post("/inventory", response_model=List[InventoryItemResponse])
+async def add_inventory_items(
+    body: AddInventoryRequest,
+    db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(get_current_org)
+):
+    """
+    Seed or add virtual phone numbers into the platform's local available inventory.
+    Admin or platform operators pre-purchase numbers and make them available to tenants.
+    """
+    added_items = []
+    for phone in body.phone_numbers:
+        existing = await db.execute(select(AvailableInventory).where(AvailableInventory.phone_number == phone))
+        if not existing.scalar_one_or_none():
+            item = AvailableInventory(
+                phone_number=phone,
+                region=body.region or "United States",
+                is_leased=False,
+                monthly_cost_usd=body.monthly_cost_usd
+            )
+            db.add(item)
+            added_items.append(item)
+    
+    if added_items:
+        await db.commit()
+        for item in added_items:
+            await db.refresh(item)
+            
+    return [
+        InventoryItemResponse(
+            id=item.id,
+            phone_number=item.phone_number,
+            region=item.region,
+            is_leased=item.is_leased,
+            monthly_cost_usd=item.monthly_cost_usd
+        ) for item in added_items
+    ]
+
+
+@router.get("/inventory", response_model=List[InventoryItemResponse])
+async def list_inventory_items(
+    db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(get_current_org)
+):
+    """List all phone numbers currently registered in the local inventory pool."""
+    query = select(AvailableInventory)
+    result = await db.execute(query)
+    items = result.scalars().all()
+    return [
+        InventoryItemResponse(
+            id=item.id,
+            phone_number=item.phone_number,
+            region=item.region,
+            is_leased=item.is_leased,
+            monthly_cost_usd=item.monthly_cost_usd
+        ) for item in items
+    ]
+
