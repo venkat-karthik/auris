@@ -224,100 +224,9 @@ async def telnyx_ws(
             break
 
 
-    tools = []
-    # Register search_knowledge_base if organization has documents
-    async with AsyncSessionLocal() as session:
-        from app.models.knowledge_base import KnowledgeBaseDocument
-        doc_select = select(KnowledgeBaseDocument).where(
-            KnowledgeBaseDocument.org_id == agent.org_id,
-            (KnowledgeBaseDocument.agent_id == agent.id) | (KnowledgeBaseDocument.agent_id.is_(None))
-        )
-        doc_res = await session.execute(doc_select)
-        has_docs = len(doc_res.scalars().all()) > 0
+    from app.services.pipeline import ToolOrchestrator
+    await ToolOrchestrator.register_agent_tools(agent, workflow_state, llm_processor)
 
-    if has_docs:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "search_knowledge_base",
-                "description": "Search the knowledge base for documentation, guides, company policies to answer customer queries.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The search term or query containing relevant keywords."}
-                    },
-                    "required": ["query"]
-                }
-            }
-        })
-
-    if workflow_state:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "submit_customer_answer",
-                "description": "Submit a validated answer to the question asked, updating the context and transitioning call state.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "value": {"type": "string", "description": "The extracted value / answer from customer's speech."}
-                    },
-                    "required": ["value"]
-                }
-            }
-        })
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "end_call",
-                "description": "Terminate the call immediately.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
-        })
-
-    # Register transfer_to_agent tool
-    tools.append({
-        "type": "function",
-        "function": {
-            "name": "transfer_to_agent",
-            "description": "Transfer the call to another specialized virtual agent (e.g. support, billing, sales).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "target_agent_id": {"type": "integer", "description": "The ID of the target agent to transfer to."}
-                },
-                "required": ["target_agent_id"]
-            }
-        }
-    })
-
-    # Register send_whatsapp_message tool
-    tools.append({
-        "type": "function",
-        "function": {
-            "name": "send_whatsapp_message",
-            "description": "Send a WhatsApp text message containing an optional trackable link/URL to the customer.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string", "description": "The message body template (e.g. 'Click here to view your invoice: {link}')."},
-                    "link_url": {"type": "string", "description": "The destination URL that the customer should visit (optional)."}
-                },
-                "required": ["message"]
-            }
-        }
-    })
-
-    # Register custom tools from agent configuration
-    custom_tools = agent.model_config.get("tools", [])
-    if custom_tools:
-        tools.extend(custom_tools)
-
-    if llm_processor:
-        llm_processor.set_tools(tools)
 
     
     transcript_segments = []
@@ -405,98 +314,20 @@ async def telnyx_ws(
                         turn_timers[k] = None
 
             elif frame.type == FrameType.TOOL_CALL:
-                # Intercept tool calls, execute them, and push back TOOL_RESULT
-                data = frame.data or {}
-                name = data.get("name")
-                args = data.get("arguments", {})
-                call_id = data.get("call_id")
-                result = None
-
-                if name == "search_knowledge_base":
-                    query = args.get("query", "")
-                    async with AsyncSessionLocal() as session:
-                        from app.services.rag_service import retrieve_context
-                        result = await retrieve_context(session, agent.id, agent.org_id, query)
-                elif name == "submit_customer_answer" and workflow_state:
-                    val = args.get("value", "")
-                    active_node = workflow_state.get_active_node()
-                    if active_node and active_node.get("type") == "qa":
-                        var_name = active_node.get("data", {}).get("expected_variable", "qa_ans")
-                        workflow_state.context[var_name] = val
-                    next_node = workflow_state.transition_to_next()
-                    if next_node:
-                        from app.services.pipeline.frame import Frame
-                        new_prompt, should_end = await workflow_state.execute_active_node(db=db, run_id=run_id)
-                        if should_end:
-                            await pipeline.push(Frame(type=FrameType.CALL_END))
-                            result = {"status": "call_ended"}
-                        else:
-                            if llm_processor:
-                                llm_processor.system_prompt = new_prompt
-                                llm_processor._messages.append({
-                                    "role": "system",
-                                    "content": f"[SYSTEM NOTICE: Workflow state changed. Active Prompt is now:\n{new_prompt}]"
-                                })
-                            result = {"status": "success", "next_node": next_node.get("id")}
-                    else:
-                        result = {"status": "success", "next_node": None}
-                elif name == "transfer_to_agent":
-                    target_agent_id = args.get("target_agent_id")
-                    async with AsyncSessionLocal() as session:
-                        res = await session.execute(select(Agent).where(Agent.id == target_agent_id, Agent.org_id == org_id))
-                        target_agent = res.scalar_one_or_none()
-                        if target_agent:
-                            cr_res = await session.execute(select(CallRun).where(CallRun.id == run_id))
-                            cr_rec = cr_res.scalar_one_or_none()
-                            if cr_rec:
-                                cr_rec.agent_id = target_agent.id
-                                await session.commit()
-                            
-                            from app.routes.calls import _extract_system_prompt
-                            new_prompt = _extract_system_prompt(target_agent.graph)
-                            if llm_processor:
-                                llm_processor.system_prompt = new_prompt
-                                llm_processor._messages.append({
-                                    "role": "system",
-                                    "content": f"[SYSTEM NOTICE: Call transferred to {target_agent.name}. System prompt updated to:\n{new_prompt}]"
-                                })
-                            result = {"status": "success", "message": f"Transferred to agent {target_agent.name}"}
-                        else:
-                            result = {"status": "failed", "error": "Agent not found"}
-                elif name == "end_call":
-                    from app.services.pipeline.frame import Frame
-                    await pipeline.push(Frame(type=FrameType.CALL_END))
-                    result = {"status": "call_ended"}
-                elif name == "send_whatsapp_message":
-                    result = await handle_mid_call_whatsapp_tool(args, run_id, from_number)
-
-                if result is None:
-                    # General-purpose server_url webhook for arbitrary tool calls
-                    server_url = agent.model_config.get("server_url")
-                    if server_url:
-                        import httpx
-                        transcript_so_far = "\n".join(transcript_segments)
-                        try:
-                            async with httpx.AsyncClient() as client:
-                                payload = {
-                                    "tool_name": name,
-                                    "arguments": args,
-                                    "call_id": run_id,
-                                    "transcript_so_far": transcript_so_far
-                                }
-                                resp = await client.post(server_url, json=payload, timeout=5.0)
-                                if resp.status_code >= 200 and resp.status_code < 300:
-                                    result = resp.json()
-                                else:
-                                    result = {"error": f"Server returned status {resp.status_code}"}
-                        except Exception as e:
-                            logger.error(f"Failed to call server_url tool {name}: {e}")
-                            result = {"error": str(e)}
-
-                if result is not None:
-                    from app.services.pipeline.frame import Frame
-                    await pipeline.push(Frame(type=FrameType.TOOL_RESULT, data={"call_id": call_id, "result": result}))
+                from app.services.pipeline import ToolOrchestrator
+                await ToolOrchestrator.handle_tool_call(
+                    frame=frame,
+                    agent=agent,
+                    run_id=run_id,
+                    pipeline=pipeline,
+                    llm_processor=llm_processor,
+                    workflow_state=workflow_state,
+                    caller_number=from_number,
+                    transcript_segments=transcript_segments,
+                    db=db,
+                )
         return frame
+
 
     start_time = datetime.now(UTC)
 
@@ -980,100 +811,9 @@ async def twilio_ws(
             llm_processor = p
             break
 
-    tools = []
-    # Register search_knowledge_base if organization has documents
-    async with AsyncSessionLocal() as session:
-        from app.models.knowledge_base import KnowledgeBaseDocument
-        doc_select = select(KnowledgeBaseDocument).where(
-            KnowledgeBaseDocument.org_id == agent.org_id,
-            (KnowledgeBaseDocument.agent_id == agent.id) | (KnowledgeBaseDocument.agent_id.is_(None))
-        )
-        doc_res = await session.execute(doc_select)
-        has_docs = len(doc_res.scalars().all()) > 0
+    from app.services.pipeline import ToolOrchestrator
+    await ToolOrchestrator.register_agent_tools(agent, workflow_state, llm_processor)
 
-    if has_docs:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "search_knowledge_base",
-                "description": "Search the knowledge base for documentation, guides, company policies to answer customer queries.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The search term or query containing relevant keywords."}
-                    },
-                    "required": ["query"]
-                }
-            }
-        })
-
-    if workflow_state:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "submit_customer_answer",
-                "description": "Submit a validated answer to the question asked, updating the context and transitioning call state.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "value": {"type": "string", "description": "The extracted value / answer from customer's speech."}
-                    },
-                    "required": ["value"]
-                }
-            }
-        })
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "end_call",
-                "description": "Terminate the call immediately.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
-        })
-
-    # Register transfer_to_agent tool
-    tools.append({
-        "type": "function",
-        "function": {
-            "name": "transfer_to_agent",
-            "description": "Transfer the call to another specialized virtual agent (e.g. support, billing, sales).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "target_agent_id": {"type": "integer", "description": "The ID of the target agent to transfer to."}
-                },
-                "required": ["target_agent_id"]
-            }
-        }
-    })
-
-    # Register send_whatsapp_message tool
-    tools.append({
-        "type": "function",
-        "function": {
-            "name": "send_whatsapp_message",
-            "description": "Send a WhatsApp text message containing an optional trackable link/URL to the customer.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string", "description": "The message body template (e.g. 'Click here to view your invoice: {link}')."},
-                    "link_url": {"type": "string", "description": "The destination URL that the customer should visit (optional)."}
-                },
-                "required": ["message"]
-            }
-        }
-    })
-
-    # Register custom tools from agent configuration
-    custom_tools = agent.model_config.get("tools", [])
-    if custom_tools:
-        tools.extend(custom_tools)
-
-    if llm_processor:
-        llm_processor.set_tools(tools)
 
     transcript_segments = []
     recorded_audio_chunks = []
@@ -1159,97 +899,18 @@ async def twilio_ws(
                         turn_timers[k] = None
 
             elif frame.type == FrameType.TOOL_CALL:
-                # Intercept tool calls, execute them, and push back TOOL_RESULT
-                data = frame.data or {}
-                name = data.get("name")
-                args = data.get("arguments", {})
-                call_id = data.get("call_id")
-                result = None
-
-                if name == "search_knowledge_base":
-                    query = args.get("query", "")
-                    async with AsyncSessionLocal() as session:
-                        from app.services.rag_service import retrieve_context
-                        result = await retrieve_context(session, agent.id, agent.org_id, query)
-                elif name == "submit_customer_answer" and workflow_state:
-                    val = args.get("value", "")
-                    active_node = workflow_state.get_active_node()
-                    if active_node and active_node.get("type") == "qa":
-                        var_name = active_node.get("data", {}).get("expected_variable", "qa_ans")
-                        workflow_state.context[var_name] = val
-                    next_node = workflow_state.transition_to_next()
-                    if next_node:
-                        from app.services.pipeline.frame import Frame
-                        new_prompt, should_end = await workflow_state.execute_active_node(db=db, run_id=run_id)
-                        if should_end:
-                            await pipeline.push(Frame(type=FrameType.CALL_END))
-                            result = {"status": "call_ended"}
-                        else:
-                            if llm_processor:
-                                llm_processor.system_prompt = new_prompt
-                                llm_processor._messages.append({
-                                    "role": "system",
-                                    "content": f"[SYSTEM NOTICE: Workflow state changed. Active Prompt is now:\n{new_prompt}]"
-                                })
-                            result = {"status": "success", "next_node": next_node.get("id")}
-                    else:
-                        result = {"status": "success", "next_node": None}
-                elif name == "transfer_to_agent":
-                    target_agent_id = args.get("target_agent_id")
-                    async with AsyncSessionLocal() as session:
-                        res = await session.execute(select(Agent).where(Agent.id == target_agent_id, Agent.org_id == org_id))
-                        target_agent = res.scalar_one_or_none()
-                        if target_agent:
-                            cr_res = await session.execute(select(CallRun).where(CallRun.id == run_id))
-                            cr_rec = cr_res.scalar_one_or_none()
-                            if cr_rec:
-                                cr_rec.agent_id = target_agent.id
-                                await session.commit()
-                            
-                            from app.routes.calls import _extract_system_prompt
-                            new_prompt = _extract_system_prompt(target_agent.graph)
-                            if llm_processor:
-                                llm_processor.system_prompt = new_prompt
-                                llm_processor._messages.append({
-                                    "role": "system",
-                                    "content": f"[SYSTEM NOTICE: Call transferred to {target_agent.name}. System prompt updated to:\n{new_prompt}]"
-                                })
-                            result = {"status": "success", "message": f"Transferred to agent {target_agent.name}"}
-                        else:
-                            result = {"status": "failed", "error": "Agent not found"}
-                elif name == "end_call":
-                    from app.services.pipeline.frame import Frame
-                    await pipeline.push(Frame(type=FrameType.CALL_END))
-                    result = {"status": "call_ended"}
-                elif name == "send_whatsapp_message":
-                    result = await handle_mid_call_whatsapp_tool(args, run_id, from_number)
-
-                if result is None:
-                    # General-purpose server_url webhook for arbitrary tool calls
-                    server_url = agent.model_config.get("server_url")
-                    if server_url:
-                        import httpx
-                        transcript_so_far = "\n".join(transcript_segments)
-                        try:
-                            async with httpx.AsyncClient() as client:
-                                payload = {
-                                    "tool_name": name,
-                                    "arguments": args,
-                                    "call_id": run_id,
-                                    "transcript_so_far": transcript_so_far
-                                }
-                                resp = await client.post(server_url, json=payload, timeout=5.0)
-                                if resp.status_code >= 200 and resp.status_code < 300:
-                                    result = resp.json()
-                                else:
-                                    result = {"error": f"Server returned status {resp.status_code}"}
-                        except Exception as e:
-                            logger.error(f"Failed to call server_url tool {name}: {e}")
-                            result = {"error": str(e)}
-
-                if result is not None:
-                    from app.services.pipeline.frame import Frame
-                    await pipeline.push(Frame(type=FrameType.TOOL_RESULT, data={"call_id": call_id, "result": result}))
+                from app.services.pipeline import ToolOrchestrator
+                await ToolOrchestrator.handle_tool_call(
+                    frame=frame,
+                    agent=agent,
+                    run_id=run_id,
+                    pipeline=pipeline,
+                    llm_processor=llm_processor,
+                    workflow_state=workflow_state,
+                    caller_number=from_number,
+                    transcript_segments=transcript_segments,
+                    db=db,
+                )
         return frame
     start_time = datetime.now(UTC)
 

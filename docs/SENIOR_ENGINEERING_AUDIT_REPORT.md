@@ -231,9 +231,10 @@ No critical crashes or unhandled exceptions remain after Phase 3 automated verif
 
 ## Phase 15 — Prioritized Improvement Roadmap
 
-### Priority 1 (High Value / Low Effort) — Next 30 Days
-* **Task 1.1:** Abstract tool execution logic out of `calls.py` WebSocket loop into `app/services/pipeline/tool_orchestrator.py` (`Effort: 3 hours | Impact: High Maintainability`).
-* **Task 1.2:** Add Alembic migration specifically creating `HNSW` index on `knowledge_base_documents.embedding` (`Effort: 1 hour | Impact: 10x Vector Search Speed under heavy load`).
+### Priority 1 (High Value / Low Effort) — Next 30 Days [ALL COMPLETED]
+* **Task 1.1 [COMPLETED]:** Abstracted tool execution logic out of `calls.py` and `telephony.py` WebSocket/SIP loops into `app/services/pipeline/tool_orchestrator.py` (`Effort: 3 hours | Impact: High Maintainability`).
+* **Task 1.2 [COMPLETED]:** Added Alembic migration `c3d4e5f6a7b8_add_hnsw_index_on_embedding.py` specifically creating `HNSW` index on vector embeddings (`Effort: 1 hour | Impact: 10x Vector Search Speed under heavy load`).
+
 
 ### Priority 2 (Medium Value / Medium Effort) — Next 60 Days
 * **Task 2.1:** Integrate Prometheus `prometheus-fastapi-instrumentator` on `/metrics` endpoint (`Effort: 4 hours | Impact: Enterprise Monitoring & SRE Visibility`).
