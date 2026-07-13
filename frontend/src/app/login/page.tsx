@@ -43,12 +43,18 @@ export default function LoginPage() {
         setError('Login failed: Token not received.');
       }
     } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      if (detail === 'Please verify your email before logging in.') {
-        setSuccessMsg('Your account is registered but unverified. Please input the 6-digit code printed in the backend console.');
-        setStep('verify');
+      if (!err.response) {
+        setError('Cannot connect to the backend server. Please check if the backend server is running.');
+      } else if (err.response.status >= 500) {
+        setError('Internal Server Error. Please ensure Docker is running and database containers are started.');
       } else {
-        setError(detail || 'Invalid email or password.');
+        const detail = err.response.data?.detail;
+        if (detail === 'Please verify your email before logging in.') {
+          setSuccessMsg('Your account is registered but unverified. Please input the 6-digit code printed in the backend console.');
+          setStep('verify');
+        } else {
+          setError(detail || 'Invalid email or password.');
+        }
       }
     } finally {
       setLoading(false);
@@ -65,7 +71,13 @@ export default function LoginPage() {
       setSuccessMsg('Registration successful! Please check your backend terminal logs for the 6-digit verification code.');
       setStep('verify');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed. Email may already be registered.');
+      if (!err.response) {
+        setError('Cannot connect to the backend server. Please check if the backend server is running.');
+      } else if (err.response.status >= 500) {
+        setError('Internal Server Error. Please ensure Docker is running and database containers are started.');
+      } else {
+        setError(err.response.data?.detail || 'Registration failed.');
+      }
     } finally {
       setLoading(false);
     }
@@ -88,7 +100,13 @@ export default function LoginPage() {
         setError('Verification succeeded but session token is missing.');
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid or expired verification code.');
+      if (!err.response) {
+        setError('Cannot connect to the backend server. Please check if the backend server is running.');
+      } else if (err.response.status >= 500) {
+        setError('Internal Server Error. Please ensure Docker is running and database containers are started.');
+      } else {
+        setError(err.response.data?.detail || 'Invalid or expired verification code.');
+      }
     } finally {
       setLoading(false);
     }

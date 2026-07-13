@@ -66,7 +66,12 @@ export default function CallsPage() {
             setSelectedCall(callsData[0]);
           }
         }
-        if (agentsData && Array.isArray(agentsData)) setAgents(agentsData);
+        if (agentsData && Array.isArray(agentsData)) {
+          setAgents(agentsData);
+          if (agentsData.length > 0) {
+            setDispatchAgentId(agentsData[0].id);
+          }
+        }
       } catch (err) {
         console.warn('Call runs load error:', err);
       }
@@ -441,18 +446,21 @@ export default function CallsPage() {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1">Select Voice Agent</label>
-                  <select
-                    value={dispatchAgentId}
-                    onChange={(e) => setDispatchAgentId(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-semibold focus:outline-none focus:border-cyan-400"
-                  >
-                    <option value={1}>Agent #1 — Inbound Reception & Lead Gen Specialist</option>
-                    <option value={2}>Agent #2 — Outbound Campaign Follow-Up Assistant</option>
-                    <option value={3}>Agent #3 — Enterprise Level 2 Technical Support Agent</option>
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name} ({a.tier})</option>
-                    ))}
-                  </select>
+                  {agents.length === 0 ? (
+                    <div className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-rose-400 font-semibold">
+                      No voice agents available. Please create a voice agent first.
+                    </div>
+                  ) : (
+                    <select
+                      value={dispatchAgentId}
+                      onChange={(e) => setDispatchAgentId(Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-semibold focus:outline-none focus:border-cyan-400"
+                    >
+                      {agents.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name} ({a.tier})</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-400 space-y-1">
@@ -465,7 +473,7 @@ export default function CallsPage() {
 
                 <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
                   <button type="button" onClick={() => setShowDispatchModal(false)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold">Cancel</button>
-                  <button type="submit" disabled={dispatching} className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-bold text-xs shadow-lg shadow-indigo-500/20 transition-all disabled:opacity-50">
+                  <button type="submit" disabled={dispatching || agents.length === 0} className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-bold text-xs shadow-lg shadow-indigo-500/20 transition-all disabled:opacity-50">
                     {dispatching ? 'Connecting...' : callMode === 'webrtc' ? 'Connect Live Browser Call' : 'Dispatch SIP Call'}
                   </button>
                 </div>
