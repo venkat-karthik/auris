@@ -127,10 +127,46 @@ export default function CampaignsPage() {
         </div>
 
         {/* Campaigns Grid */}
-                    <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-                      <span>Dialed: <strong className="text-white">{camp.completed_calls}</strong> / {camp.total_contacts}</span>
-                      <span>Success: <strong className="text-emerald-400">{camp.successful_calls}</strong></span>
+        {campaigns.length === 0 ? (
+          <div className="text-center py-20 rounded-3xl bg-slate-950/45 border border-dashed border-slate-800 backdrop-blur-md">
+            <Megaphone className="w-12 h-12 text-slate-600 mx-auto mb-4 animate-pulse" />
+            <h3 className="text-lg font-bold text-slate-300">No Active Dialing Campaigns</h3>
+            <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+              Upload a contact CSV and select an agent to dispatch bulk outbound ARQ dialer batches.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {campaigns.map((camp) => {
+              const progress = camp.total_contacts > 0 ? Math.round((camp.completed_calls / camp.total_contacts) * 100) : 0;
+              return (
+                <div key={camp.id} className="glass-card rounded-3xl p-6 space-y-5 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold">
+                          <PhoneCall className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-white leading-tight">{camp.name}</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">Created on {camp.created_at}</p>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full border ${
+                        camp.status === 'running' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 animate-pulse' :
+                        camp.status === 'paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                        camp.status === 'completed' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
+                        'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}>
+                        {camp.status}
+                      </span>
                     </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+                        <span>Dialed: <strong className="text-white">{camp.completed_calls}</strong> / {camp.total_contacts}</span>
+                        <span>Success: <strong className="text-emerald-400">{camp.successful_calls}</strong></span>
+                      </div>
                     <div className="w-full h-2 rounded-full bg-slate-900 overflow-hidden border border-slate-800">
                       <div
                         style={{ width: `${progress}%` }}
@@ -165,11 +201,12 @@ export default function CampaignsPage() {
                     {camp.status === 'running' ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                     <span>{camp.status === 'running' ? 'Pause Campaign' : camp.status === 'completed' ? 'Completed' : 'Resume Dialing'}</span>
                   </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Create Campaign Modal */}
         {showCreateModal && (

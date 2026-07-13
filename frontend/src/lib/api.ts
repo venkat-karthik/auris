@@ -92,6 +92,8 @@ export interface CallRun {
   key_topics?: string[];
   task_completed?: boolean;
   recording_url?: string;
+  transcript?: any;
+  transcript_path?: string;
   created_at: string;
 }
 
@@ -230,6 +232,18 @@ export const AurisAPI = {
         customer_number: customerNumber,
         custom_data: customData
       });
+      return res.data;
+    },
+    webCall: async (agentId: number, callerNumber: string = 'Browser WebRTC', metadata?: any) => {
+      const res = await apiClient.post('/calls/web-call', {
+        agent_id: agentId,
+        caller_number: callerNumber,
+        metadata: metadata || {}
+      });
+      return res.data;
+    },
+    end: async (id: number) => {
+      const res = await apiClient.post(`/calls/${id}/end`);
       return res.data;
     }
   },

@@ -140,11 +140,6 @@ export default function ClonedVoicesPage() {
                     <h4 className="text-sm font-extrabold text-white">{v.name}</h4>
                   </div>
 
-                <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                  <button className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all">
-                    <Play className="w-3.5 h-3.5" />
-                    <span>Test Audio</span>
-                  </button>
                   <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
                     <button className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all">
                       <Play className="w-3.5 h-3.5" />

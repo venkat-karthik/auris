@@ -70,6 +70,11 @@ class DispatchCallRequest(BaseModel):
     customer_number: str
     custom_data: dict | None = None
 
+class WebCallRequest(BaseModel):
+    agent_id: int
+    metadata: dict | None = None
+    caller_number: str | None = "Browser WebRTC Client"
+
 
 @router.post("/dispatch")
 async def dispatch_call(
@@ -97,6 +102,67 @@ async def dispatch_call(
     await db.commit()
     await db.refresh(call_run)
     return {"status": "dispatched", "call_run_id": call_run.id, "customer_number": req.customer_number}
+
+
+@router.post("/web-call")
+async def create_web_call(
+    req: WebCallRequest,
+    org: Organization = Depends(get_current_org),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Initiate a live WebRTC voice session."""
+    res = await db.execute(select(Agent).where(Agent.id == req.agent_id, Agent.org_id == org.id))
+    agent = res.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    from app.core.security import create_access_token
+    from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES
+    from datetime import timedelta
+    access_token = create_access_token(
+        data={"sub": str(user.id), "org": org.id, "role": user.role},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+
+    call_run = CallRun(
+        org_id=org.id,
+        agent_id=agent.id,
+        caller_number=req.caller_number or "Browser WebRTC Client",
+        transport="webrtc",
+        call_type="inbound",
+        status="initiated",
+        initial_context=req.metadata or {},
+        started_at=datetime.now(UTC),
+    )
+    db.add(call_run)
+    await db.commit()
+    await db.refresh(call_run)
+
+    return {
+        "call_id": call_run.id,
+        "access_token": access_token,
+        "webrtc_url": f"/api/v1/calls/ws/{agent.id}?token={access_token}&caller_number=Browser%20WebRTC"
+    }
+
+
+@router.post("/{call_id}/end")
+async def end_call(
+    call_id: int,
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id))
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Call not found")
+    if run.status in ("initiated", "running"):
+        run.status = "completed"
+        run.ended_at = datetime.now(UTC)
+        if run.started_at:
+            run.duration_seconds = (run.ended_at - run.started_at).total_seconds()
+        await db.commit()
+    return {"status": "ended", "call_id": run.id}
 
 
 @router.get("", response_model=list[CallRunResponse])
