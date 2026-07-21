@@ -400,5 +400,77 @@ export const AurisAPI = {
       const res = await apiClient.post('/mcp/invoke', { tool_name: toolName, arguments: args });
       return res.data;
     }
+  },
+
+  // 13. API Keys Router
+  apiKeys: {
+    list: async () => {
+      const res = await apiClient.get('/api-keys');
+      return res.data;
+    },
+    create: async (name: string) => {
+      const res = await apiClient.post('/api-keys', { name });
+      return res.data;
+    },
+    delete: async (keyId: string) => {
+      const res = await apiClient.delete(`/api-keys/${keyId}`);
+      return res.data;
+    }
+  },
+
+  // 14. Analytics Router
+  analytics: {
+    agents: async () => {
+      const res = await apiClient.get('/analytics/agents');
+      return res.data;
+    },
+    callOutcomes: async () => {
+      const res = await apiClient.get('/analytics/call_outcomes');
+      return res.data;
+    }
+  },
+
+  // 15. Integrations Router
+  integrations: {
+    list: async () => {
+      const res = await apiClient.get('/integrations');
+      return res.data;
+    },
+    toggle: async (provider: string, config: any) => {
+      const res = await apiClient.post('/integrations/toggle', { provider, config });
+      return res.data;
+    }
+  },
+
+  // 16. Reseller Router
+  reseller: {
+    submitQuery: async (data: any) => {
+      const res = await apiClient.post('/reseller', data);
+      return res.data;
+    }
+  },
+
+  // 17. Supervisor Router
+  supervisor: {
+    whisper: async (callId: string | number, message: string) => {
+      const res = await apiClient.post('/supervisor/whisper', { call_id: callId, message });
+      return res.data;
+    },
+    takeoverStart: async (callId: string | number) => {
+      const res = await apiClient.post('/supervisor/takeover/start', { call_id: callId });
+      return res.data;
+    },
+    takeoverStop: async (callId: string | number) => {
+      const res = await apiClient.post('/supervisor/takeover/stop', { call_id: callId });
+      return res.data;
+    }
+  },
+
+  // 18. Links Router
+  links: {
+    click: async (token: string) => {
+      const res = await apiClient.get(`/links/click/${token}`);
+      return res.data;
+    }
   }
 };
