@@ -24,7 +24,8 @@ import {
   LogOut,
   Bell,
   CheckCircle2,
-  Workflow
+  Workflow,
+  Puzzle
 } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -51,6 +52,7 @@ const NAV_GROUPS = [
     items: [
       { name: 'Customer Memory', href: '/customers', icon: Users },
       { name: 'WhatsApp Automation', href: '/whatsapp', icon: MessageSquare },
+      { name: 'Integrations', href: '/integrations', icon: Puzzle },
       { name: 'Billing & Credits', href: '/billing', icon: CreditCard },
       { name: 'SIP & Settings', href: '/settings', icon: Settings },
     ],
