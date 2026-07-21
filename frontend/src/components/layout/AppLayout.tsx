@@ -25,7 +25,8 @@ import {
   Bell,
   CheckCircle2,
   Workflow,
-  Puzzle
+  Puzzle,
+  Headphones
 } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -36,6 +37,7 @@ const NAV_GROUPS = [
       { name: 'Voice Agents', href: '/agents', icon: Bot },
       { name: 'Workflow Studio', href: '/agents/1/studio', icon: Workflow },
       { name: 'Live Call Runs', href: '/calls', icon: PhoneCall },
+      { name: 'Live Supervisor', href: '/supervisor', icon: Headphones },
     ],
   },
   {
