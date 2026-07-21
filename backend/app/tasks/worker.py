@@ -11,11 +11,13 @@ from datetime import UTC, datetime
 from loguru import logger
 from minio import Minio
 from arq.connections import RedisSettings
+from arq.cron import cron
 from sqlalchemy import select
 
 from app.core.config import (
     REDIS_URL, MINIO_ENDPOINT, MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE,
+    DATABASE_URL
 )
 from app.core.database import AsyncSessionLocal
 from app.models.call_run import CallRun
@@ -486,6 +488,42 @@ async def dial_next_contacts(ctx, campaign_id: int):
                 await redis_pool.enqueue_job("dial_next_contacts", campaign_id, _defer_by=5)
 
 
+async def perform_daily_db_backup(ctx):
+    """
+    ARQ Cron Job:
+    1. Runs pg_dump using the DATABASE_URL.
+    2. Uploads the compressed dump to MinIO.
+    """
+    logger.info("ARQ: Starting daily database backup...")
+    try:
+        # Resolve DB string for pg_dump (replacing asyncpg with standard postgresql)
+        db_url = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+        
+        # We'll use custom format (-Fc) which is compressed by default
+        process = await asyncio.create_subprocess_exec(
+            "pg_dump", "-Fc", db_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            logger.error(f"ARQ: pg_dump failed: {stderr.decode()}")
+            return
+            
+        logger.info(f"ARQ: pg_dump completed successfully. Output size: {len(stdout)} bytes.")
+        
+        date_str = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
+        object_name = f"backups/auris_db_backup_{date_str}.dump"
+        
+        # Upload directly to MinIO
+        path = upload_file_to_minio(MINIO_BUCKET, object_name, stdout, content_type="application/octet-stream")
+        logger.info(f"ARQ: Successfully uploaded backup to {path}")
+        
+    except Exception as e:
+        logger.error(f"ARQ: Failed to perform daily database backup: {e}")
+
 # ── ARQ Settings ─────────────────────────────────────────────────────────────
 
 # Parse Redis Settings
@@ -509,6 +547,9 @@ class WorkerSettings:
         dial_next_contacts,
         run_post_call_analysis,
         update_campaign_contact_status
+    ]
+    cron_jobs = [
+        cron(perform_daily_db_backup, hour={0}, minute=0)
     ]
     redis_settings = arq_redis_settings
 
