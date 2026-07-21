@@ -1,8 +1,24 @@
 """
 Auris - Agent CRUD routes
+Refactored to use CRUD helpers for DRY and consistency
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.dependencies.auth import get_current_org, get_current_user
+from app.models.agent import Agent
+from app.models.organization import Organization
+from app.models.user import User
+from app.utils.crud import (
+    get_agent_or_404,
+    list_agents_paginated,
+    safe_add_and_commit,
+    safe_update_and_commit,
+)
+
+router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentResponse(BaseModel):
@@ -17,16 +33,6 @@ class AgentResponse(BaseModel):
     class Config:
         from_attributes = True
         populate_by_name = True
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.database import get_db
-from app.dependencies.auth import get_current_org, get_current_user
-from app.models.agent import Agent
-from app.models.organization import Organization
-from app.models.user import User
-
-router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
@@ -55,6 +61,7 @@ async def create_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Create a new agent for the organization."""
     agent = Agent(
         org_id=org.id,
         created_by=user.id,
@@ -64,21 +71,19 @@ async def create_agent(
         model_config=body.model_config_data,
         context_variables=body.context_variables,
     )
-    db.add(agent)
-    await db.commit()
-    await db.refresh(agent)
-    return agent
+    return await safe_add_and_commit(db, agent, "create_agent")
 
 
 @router.get("", response_model=list[AgentResponse])
 async def list_agents(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+    offset: int = 0,
 ):
-    result = await db.execute(
-        select(Agent).where(Agent.org_id == org.id, Agent.is_active == True)
-    )
-    return result.scalars().all()
+    """List all active agents for the organization."""
+    agents = await list_agents_paginated(org.id, db, limit=limit, offset=offset)
+    return agents
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
@@ -87,13 +92,8 @@ async def get_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.org_id == org.id)
-    )
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    """Get a specific agent by ID."""
+    return await get_agent_or_404(agent_id, org.id, db, eager_load=True)
 
 
 @router.put("/{agent_id}", response_model=AgentResponse)
@@ -103,13 +103,10 @@ async def update_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.org_id == org.id)
-    )
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    """Update an existing agent."""
+    agent = await get_agent_or_404(agent_id, org.id, db, eager_load=False)
 
+    # Update only provided fields
     if body.name is not None:
         agent.name = body.name
     if body.description is not None:
@@ -121,9 +118,7 @@ async def update_agent(
     if body.context_variables is not None:
         agent.context_variables = body.context_variables
 
-    await db.commit()
-    await db.refresh(agent)
-    return agent
+    return await safe_update_and_commit(db, agent, "update_agent")
 
 
 @router.delete("/{agent_id}", status_code=204)
@@ -132,14 +127,10 @@ async def delete_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.org_id == org.id)
-    )
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    """Soft-delete an agent (sets is_active = False)."""
+    agent = await get_agent_or_404(agent_id, org.id, db, eager_load=False)
     agent.is_active = False
-    await db.commit()
+    await safe_update_and_commit(db, agent, "delete_agent")
 
 
 @router.get("/{agent_id}/studio")
@@ -149,10 +140,7 @@ async def get_studio_graph(
     db: AsyncSession = Depends(get_db),
 ):
     """Get visual studio workflow graph data for React Flow."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.org_id == org.id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(agent_id, org.id, db, eager_load=False)
     return {"agent_id": agent.id, "graph": agent.graph or {}}
 
 
@@ -164,11 +152,8 @@ async def save_studio_graph(
     db: AsyncSession = Depends(get_db),
 ):
     """Save visual studio workflow graph from React Flow."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.org_id == org.id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(agent_id, org.id, db, eager_load=False)
     agent.graph = graph_data
-    await db.commit()
+    await safe_update_and_commit(db, agent, "save_studio_graph")
     return {"status": "success", "agent_id": agent.id, "graph": agent.graph}
 

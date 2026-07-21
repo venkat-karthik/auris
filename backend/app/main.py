@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from app.core.config import APP_NAME, APP_VERSION, CORS_ORIGINS, DEBUG
+from app.middleware.exception_handler import register_exception_handlers
+from app.middleware.request_context import RequestContextMiddleware
 from app.routes.agents import router as agents_router
 from app.routes.auth import router as auth_router
 from app.routes.billing import router as billing_router
@@ -37,7 +39,10 @@ from app.dependencies.rate_limit import check_rate_limit
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── Startup ───────────────────────────────────────────────────────────────
     from app.core.config import SENTRY_DSN, ENVIRONMENT
+    from app.core.database import dispose_pool
+    
     if SENTRY_DSN and not SENTRY_DSN.startswith("mock"):
         import sentry_sdk
         try:
@@ -46,8 +51,12 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to initialize Sentry: {e}")
 
-    logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
+    logger.info(f"Starting {APP_NAME} v{APP_VERSION} [Environment: {ENVIRONMENT}]")
+    
     yield
+    
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    await dispose_pool()
     logger.info(f"Shutting down {APP_NAME}")
 
 
@@ -61,12 +70,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── Prometheus Metrics ────────────────────────────────────────────────────────
-from app.services.metrics import setup_prometheus_metrics
-setup_prometheus_metrics(app)
+# ── Exception Handlers ────────────────────────────────────────────────────────
+register_exception_handlers(app)
 
+# ── Middleware (ORDER MATTERS) ────────────────────────────────────────────────
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+# 1. Request context (adds request_id, timing)
+app.add_middleware(RequestContextMiddleware)
+
+# 2. CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -74,6 +86,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Prometheus Metrics ────────────────────────────────────────────────────────
+from app.services.metrics import setup_prometheus_metrics
+setup_prometheus_metrics(app)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 API_PREFIX = "/api/v1"
@@ -102,12 +118,18 @@ app.include_router(monitor_router, prefix=API_PREFIX)
 app.include_router(links_router, prefix=API_PREFIX)
 app.include_router(supervisor_router, prefix=API_PREFIX)
 
-
+# ── Health Check ──────────────────────────────────────────────────────────────
 
 @app.get("/api/v1/health")
 async def health():
+    """Health check endpoint for monitoring"""
+    from app.core.database import get_db_pool_status
+    
     return {
         "status": "ok",
         "service": APP_NAME,
         "version": APP_VERSION,
+        "pool_status": await get_db_pool_status(),
     }
+
+logger.info("FastAPI application initialized successfully")
