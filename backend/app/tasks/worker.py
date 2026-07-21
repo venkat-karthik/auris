@@ -24,6 +24,7 @@ from app.models.call_run import CallRun
 from app.models.agent import Agent
 from app.models.organization import Organization
 from app.models.campaign import Campaign, CampaignContact
+from app.models.integration import Integration
 from app.services.customer_memory import upsert_customer
 
 
@@ -349,8 +350,36 @@ async def run_post_call_analysis(ctx, call_run_id: int):
                     "transcript": transcript_payload
                 }
             ))
+            
+            # Dispatch to configured third-party CRMs
+            from app.services.crm_sync_service import sync_to_hubspot, sync_to_salesforce
+            
+            integration_result = await db.execute(
+                select(Integration).where(
+                    Integration.org_id == run.org_id, 
+                    Integration.is_connected == True
+                )
+            )
+            integrations = integration_result.scalars().all()
+            
+            call_data = {
+                "call_id": run.id,
+                "caller_number": run.caller_number,
+                "summary": run.summary,
+                "sentiment": run.sentiment,
+                "disposition": run.disposition,
+                "transcript": transcript_payload
+            }
+            
+            for integration in integrations:
+                credentials = integration.credentials or {}
+                if integration.service_name == "hubspot":
+                    asyncio.create_task(sync_to_hubspot(credentials, call_data))
+                elif integration.service_name == "salesforce":
+                    asyncio.create_task(sync_to_salesforce(credentials, call_data))
+                    
         except Exception as ex:
-            logger.error(f"ARQ: Failed to queue webhook event dispatch: {ex}")
+            logger.error(f"ARQ: Failed to queue webhook event dispatch or CRM sync: {ex}")
         logger.info(f"ARQ: Successfully saved post-call analysis for call={call_run_id}")
 
 
