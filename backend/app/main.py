@@ -40,8 +40,17 @@ from app.dependencies.rate_limit import check_rate_limit
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
-    from app.core.config import SENTRY_DSN, ENVIRONMENT
+    from app.core.config import SENTRY_DSN, ENVIRONMENT, CORS_ORIGINS
     from app.core.database import dispose_pool
+    from app.core.config_validation import validate_config, log_config_summary
+    
+    # Validate configuration on startup (fail fast)
+    try:
+        validate_config(ENVIRONMENT, DEBUG)
+        log_config_summary(ENVIRONMENT, DEBUG, CORS_ORIGINS)
+    except ValueError as e:
+        logger.error(f"Configuration validation failed: {e}")
+        raise
     
     if SENTRY_DSN and not SENTRY_DSN.startswith("mock"):
         import sentry_sdk
