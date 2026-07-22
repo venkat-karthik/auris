@@ -172,7 +172,8 @@ async def list_calls_paginated(
     call_type: Optional[str] = None,
     disposition: Optional[str] = None,
     start_date: Optional[Any] = None,
-    end_date: Optional[Any] = None
+    end_date: Optional[Any] = None,
+    eager_load: bool = True,
 ) -> list['CallRun']:
     """
     List calls with advanced filtering and pagination.
@@ -188,13 +189,19 @@ async def list_calls_paginated(
         disposition: Filter by disposition (optional)
         start_date: Filter by created_at >= start_date (optional)
         end_date: Filter by created_at <= end_date (optional)
+        eager_load: Eagerly load related agent/org (prevents N+1)
     
     Returns:
         List of CallRun objects
     """
     from app.models.call_run import CallRun
+    from sqlalchemy.orm import selectinload
     
     query = select(CallRun).where(CallRun.org_id == org_id)
+    
+    # Apply eager loading to prevent N+1 queries
+    if eager_load:
+        query = query.options(selectinload(CallRun.agent), selectinload(CallRun.org))
     
     # Apply filters
     if agent_id is not None:

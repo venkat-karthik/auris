@@ -189,7 +189,13 @@ async def list_calls(
     
     Response includes X-Request-ID header for request tracing.
     """
-    query = select(CallRun).where(CallRun.org_id == org.id)
+    from sqlalchemy.orm import selectinload
+    
+    query = (
+        select(CallRun)
+        .where(CallRun.org_id == org.id)
+        .options(selectinload(CallRun.agent), selectinload(CallRun.org))
+    )
     
     # Dynamic filtering
     if agent_id is not None:
