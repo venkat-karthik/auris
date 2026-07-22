@@ -2,22 +2,30 @@
 Auris - Retell REST API Compatibility Router
 Implements exact Retell AI endpoints and schemas so official Retell SDKs (Python & TypeScript)
 can connect to Auris with zero code changes by simply setting `base_url`.
+
+Refactored to use CRUD helpers for DRY and consistency.
 """
 from datetime import UTC, datetime
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_org, get_current_user
-from sqlalchemy.orm.attributes import flag_modified
 from app.models.agent import Agent
 from app.models.call_run import CallRun
 from app.models.phone_number import PhoneNumber
 from app.models.organization import Organization
 from app.models.user import User
+from app.utils.crud import (
+    get_agent_or_404,
+    get_call_or_404,
+    safe_add_and_commit,
+    safe_update_and_commit,
+)
 
 router = APIRouter(tags=["retell-compat"])
 
@@ -169,6 +177,7 @@ async def create_retell_agent(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Create a new agent compatible with Retell API schema."""
     model_config = {
         "language": req.language or "en-US",
         "server_url": req.webhook_url,
@@ -189,9 +198,7 @@ async def create_retell_agent(
         model_config=model_config,
         graph={"nodes": [], "edges": []},
     )
-    db.add(agent)
-    await db.commit()
-    await db.refresh(agent)
+    agent = await safe_add_and_commit(db, agent, "create_retell_agent")
     return _format_agent(agent)
 
 
@@ -201,15 +208,13 @@ async def get_retell_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Get agent by ID in Retell API schema."""
     try:
         aid = int(agent_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    result = await db.execute(select(Agent).where(Agent.id == aid, Agent.org_id == org.id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(aid, org.id, db, eager_load=False)
     return _format_agent(agent)
 
 
@@ -220,15 +225,13 @@ async def update_retell_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Update agent in Retell API schema."""
     try:
         aid = int(agent_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    result = await db.execute(select(Agent).where(Agent.id == aid, Agent.org_id == org.id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(aid, org.id, db, eager_load=False)
 
     if req.agent_name is not None:
         agent.name = req.agent_name
@@ -249,8 +252,7 @@ async def update_retell_agent(
             
     agent.model_config = cfg
     flag_modified(agent, "model_config")
-    await db.commit()
-    await db.refresh(agent)
+    agent = await safe_update_and_commit(db, agent, "update_retell_agent")
     return _format_agent(agent)
 
 
@@ -260,19 +262,15 @@ async def delete_retell_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Delete agent (soft delete)."""
     try:
         aid = int(agent_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    result = await db.execute(select(Agent).where(Agent.id == aid, Agent.org_id == org.id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    await db.delete(agent)
-    await db.commit()
-    return None
+    agent = await get_agent_or_404(aid, org.id, db, eager_load=False)
+    agent.is_active = False
+    await safe_update_and_commit(db, agent, "delete_retell_agent")
 
 
 @router.get("/list-agents", response_model=list[RetellAgentResponse])
@@ -280,6 +278,7 @@ async def list_retell_agents(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """List all agents in Retell API schema."""
     result = await db.execute(select(Agent).where(Agent.org_id == org.id))
     agents = result.scalars().all()
     return [_format_agent(a) for a in agents]
@@ -293,15 +292,13 @@ async def create_retell_web_call(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Create a web call (WebRTC) in Retell API schema."""
     try:
         aid = int(req.agent_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    result = await db.execute(select(Agent).where(Agent.id == aid, Agent.org_id == org.id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(aid, org.id, db, eager_load=False)
 
     run = CallRun(
         org_id=org.id,
@@ -311,9 +308,7 @@ async def create_retell_web_call(
         status="created",
         started_at=datetime.now(UTC),
     )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
+    run = await safe_add_and_commit(db, run, "create_retell_web_call")
 
     # Generate token
     from app.core.security import create_access_token
@@ -331,15 +326,13 @@ async def create_retell_phone_call(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Create a phone call (outbound) in Retell API schema."""
     try:
         aid = int(req.agent_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    result = await db.execute(select(Agent).where(Agent.id == aid, Agent.org_id == org.id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(aid, org.id, db, eager_load=False)
 
     run = CallRun(
         org_id=org.id,
@@ -351,9 +344,7 @@ async def create_retell_phone_call(
         called_number=req.to_number,
         started_at=datetime.now(UTC),
     )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
+    run = await safe_add_and_commit(db, run, "create_retell_phone_call")
 
     return _format_call(run)
 
@@ -364,15 +355,13 @@ async def get_retell_call(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Get call by ID in Retell API schema."""
     try:
         cid = int(call_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Call not found")
     
-    result = await db.execute(select(CallRun).where(CallRun.id == cid, CallRun.org_id == org.id))
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Call not found")
+    run = await get_call_or_404(cid, org.id, db)
     return _format_call(run)
 
 
@@ -381,6 +370,7 @@ async def list_retell_calls(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """List all calls in Retell API schema."""
     result = await db.execute(select(CallRun).where(CallRun.org_id == org.id).order_by(CallRun.started_at.desc()))
     runs = result.scalars().all()
     return [_format_call(r) for r in runs]
@@ -394,11 +384,14 @@ async def create_retell_phone_number(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Create a phone number in Retell API schema."""
     num = req.phone_number or "+18005550199"
     aid = None
     if req.agent_id:
         try:
             aid = int(req.agent_id)
+            # Verify agent exists
+            await get_agent_or_404(aid, org.id, db, eager_load=False)
         except ValueError:
             pass
 
@@ -408,9 +401,7 @@ async def create_retell_phone_number(
         phone_number=num,
         label="Retell Number",
     )
-    db.add(phone)
-    await db.commit()
-    await db.refresh(phone)
+    phone = await safe_add_and_commit(db, phone, "create_retell_phone_number")
 
     return RetellPhoneNumberResponse(
         phone_number=num,
@@ -427,6 +418,7 @@ async def get_retell_phone_number(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Get phone number in Retell API schema."""
     result = await db.execute(select(PhoneNumber).where(PhoneNumber.phone_number == phone_number, PhoneNumber.org_id == org.id))
     phone = result.scalar_one_or_none()
     if not phone:
@@ -447,6 +439,7 @@ async def delete_retell_phone_number(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """Delete phone number."""
     result = await db.execute(select(PhoneNumber).where(PhoneNumber.phone_number == phone_number, PhoneNumber.org_id == org.id))
     phone = result.scalar_one_or_none()
     if not phone:
@@ -454,4 +447,3 @@ async def delete_retell_phone_number(
     
     await db.delete(phone)
     await db.commit()
-    return None
