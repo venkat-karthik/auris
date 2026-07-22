@@ -10,6 +10,12 @@ from app.dependencies.auth import get_current_org, get_current_user
 from app.models.organization import Organization
 from app.models.campaign import Campaign, CampaignContact
 from app.services.dialer_service import parse_csv_contacts
+from app.utils.crud import (
+    safe_add_and_commit,
+    safe_update_and_commit,
+    validate_file_size,
+    validate_content_type,
+)
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -70,9 +76,7 @@ async def create_campaign(
         name=payload.name,
         status="pending"
     )
-    db.add(campaign)
-    await db.commit()
-    await db.refresh(campaign)
+    campaign = await safe_add_and_commit(db, campaign, "create_campaign")
     return campaign
 
 
@@ -92,7 +96,16 @@ async def upload_contacts(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
+    # Validate file size (5 MB max for CSV)
     file_data = await file.read()
+    try:
+        validate_file_size(len(file_data), max_size=5*1024*1024, file_name="CSV file")
+        # Validate content type
+        if file.content_type and file.content_type != "text/csv" and not file.filename.endswith(".csv"):
+            raise ValueError("Invalid file type - must be CSV")
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     try:
         contacts_data = parse_csv_contacts(file_data)
     except Exception as e:
@@ -138,23 +151,26 @@ async def start_campaign(
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     campaign.status = "running"
-    await db.commit()
+    campaign = await safe_update_and_commit(db, campaign, "start_campaign")
 
-    # Enqueue dialing task on background worker
-    try:
-        from arq import create_pool
-        from arq.connections import RedisSettings
-        from app.core.config import REDIS_URL
-        redis_settings = RedisSettings.from_dsn(REDIS_URL)
-        async def enqueue():
+    # Enqueue dialing task on background worker with error handling
+    async def enqueue_with_error_handling():
+        try:
+            from arq import create_pool
+            from arq.connections import RedisSettings
+            from app.core.config import REDIS_URL
+            redis_settings = RedisSettings.from_dsn(REDIS_URL)
             pool = await create_pool(redis_settings)
             # Enqueue outbound dialer task
             await pool.enqueue_job("dial_next_contacts", campaign_id)
             await pool.close()
-        import asyncio
-        asyncio.create_task(enqueue())
-    except Exception as e:
-        logger.error(f"Failed to enqueue campaign dialer background task: {e}")
+            logger.info(f"Campaign {campaign_id} dialer task enqueued successfully")
+        except Exception as e:
+            logger.error(f"Failed to enqueue campaign {campaign_id} dialer background task: {e}")
+            # Don't raise - campaign started but background job failed
+
+    import asyncio
+    asyncio.create_task(enqueue_with_error_handling())
 
     return campaign
 
@@ -175,7 +191,7 @@ async def pause_campaign(
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     campaign.status = "paused"
-    await db.commit()
+    campaign = await safe_update_and_commit(db, campaign, "pause_campaign")
     return campaign
 
 
