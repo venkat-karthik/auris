@@ -84,10 +84,14 @@ register_exception_handlers(app)
 
 # ── Middleware (ORDER MATTERS) ────────────────────────────────────────────────
 
-# 1. Request context (adds request_id, timing)
+# 1. Metrics tracking
+from app.middleware.metrics_middleware import MetricsMiddleware
+app.add_middleware(MetricsMiddleware)
+
+# 2. Request context (adds request_id, timing)
 app.add_middleware(RequestContextMiddleware)
 
-# 2. CORS
+# 3. CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
