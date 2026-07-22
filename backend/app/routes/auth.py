@@ -155,9 +155,13 @@ async def login(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
+    from app.services.structured_logging import log_auth_failure, StructuredLogger, LogLevel
+    
     email_val = None
     pass_val = None
     content_type = request.headers.get("content-type", "")
+    ip_address = request.client.host if request.client else None
+    
     if "application/json" in content_type:
         try:
             data = await request.json()
@@ -174,27 +178,32 @@ async def login(
             pass
 
     if not email_val or not pass_val:
+        log_auth_failure("Missing credentials", ip_address=ip_address)
         raise HTTPException(status_code=400, detail="Email and password are required")
 
     result = await db.execute(select(User).where(User.email == email_val.lower()))
     user = result.scalar_one_or_none()
 
     if not user or not user.password_hash or not verify_password(pass_val, user.password_hash):
+        log_auth_failure("Invalid email or password", ip_address=ip_address, email=email_val)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
     if not user.is_active:
+        log_auth_failure("Account deactivated", ip_address=ip_address, user_id=user.id)
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     if not user.is_verified:
+        log_auth_failure("Email not verified", ip_address=ip_address, user_id=user.id)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please verify your email before logging in."
         )
 
     token = create_access_token(user_id=user.id, org_id=user.selected_org_id)
+    StructuredLogger.log_auth_success(user.id, user.selected_org_id, method="password")
     return TokenResponse(access_token=token, user_id=user.id, org_id=user.selected_org_id)
 
 

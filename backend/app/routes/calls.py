@@ -115,6 +115,8 @@ async def create_web_call(
     db: AsyncSession = Depends(get_db),
 ):
     """Initiate a live WebRTC voice session."""
+    from app.services.structured_logging import log_call_created
+    
     agent = await get_agent_or_404(req.agent_id, org.id, db, eager_load=False)
 
     from app.core.security import create_access_token
@@ -136,6 +138,14 @@ async def create_web_call(
         started_at=datetime.now(UTC),
     )
     call_run = await safe_add_and_commit(db, call_run, "create_web_call")
+    
+    log_call_created(
+        call_id=call_run.id,
+        org_id=org.id,
+        agent_id=agent.id,
+        call_type="webrtc",
+        caller_number=call_run.caller_number
+    )
 
     return {
         "call_id": call_run.id,

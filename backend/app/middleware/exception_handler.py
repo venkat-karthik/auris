@@ -18,11 +18,22 @@ class GlobalExceptionHandler:
     @staticmethod
     async def http_exception_handler(request: Request, exc: HTTPException):
         """Handle HTTPException"""
+        from app.services.structured_logging import log_api_error
+        
         request_id = getattr(request.state, 'request_id', str(uuid.uuid4()))
+        endpoint = f"{request.method} {request.url.path}"
         
         logger.warning(
             f"HTTPException [ID: {request_id}]: "
             f"Status={exc.status_code}, Detail={exc.detail}"
+        )
+        
+        log_api_error(
+            error_code=f"HTTP_{exc.status_code}",
+            error_message=exc.detail,
+            endpoint=endpoint,
+            status_code=exc.status_code,
+            request_id=request_id
         )
         
         return JSONResponse(
@@ -67,11 +78,20 @@ class GlobalExceptionHandler:
     @staticmethod
     async def database_operational_error(request: Request, exc: OperationalError):
         """Handle database operational errors (connection issues, etc.)"""
+        from app.services.structured_logging import StructuredLogger, CriticalPath, LogLevel
+        
         request_id = getattr(request.state, 'request_id', str(uuid.uuid4()))
         
         logger.error(
             f"Database Operational Error [ID: {request_id}]: {exc.orig}",
             exc_info=True
+        )
+        
+        StructuredLogger.log_database_error(
+            operation="query_execution",
+            table="unknown",
+            error_message=str(exc.orig),
+            request_id=request_id
         )
         
         return JSONResponse(
