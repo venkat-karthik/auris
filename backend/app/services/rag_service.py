@@ -6,6 +6,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import OPENAI_API_KEY
 from app.models.knowledge_base import KnowledgeBaseDocument, KnowledgeBaseChunk
+from app.services.circuit_breaker import circuit_breaker
 
 # Check if pypdf is available
 try:
@@ -14,6 +15,12 @@ except ImportError:
     pypdf = None
 
 
+@circuit_breaker(
+    "openai-embeddings",
+    failure_threshold=5,
+    recovery_timeout=60.0,
+    expected_exceptions=(Exception,)
+)
 async def generate_embeddings(text: str) -> list[float]:
     """Generate 1536-dim vector embedding using OpenAI API."""
     if not OPENAI_API_KEY:

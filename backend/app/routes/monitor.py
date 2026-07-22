@@ -1,12 +1,23 @@
 """
 Auris - Monitor routes
 WebSocket endpoint for active call subscription updates.
+Health monitoring and circuit breaker status.
 """
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 from app.services.monitor_tracker import MonitorTracker
+from app.services.circuit_breaker import get_all_circuit_breakers
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
+
+@router.get("/circuit-breakers")
+async def get_circuit_breaker_status():
+    """Get status of all circuit breakers for external API calls."""
+    return {
+        "circuit_breakers": get_all_circuit_breakers(),
+        "total": len(get_all_circuit_breakers())
+    }
+
 
 @router.websocket("/ws")
 async def monitor_ws(websocket: WebSocket):
