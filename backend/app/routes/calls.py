@@ -1,6 +1,7 @@
 """
 Auris - Call routes
 WebSocket endpoint for browser voice calls + REST for call history.
+Refactored to use CRUD helpers for consistency and reduced duplication.
 """
 import asyncio
 from datetime import UTC, datetime
@@ -25,6 +26,13 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.services.pipeline.factory import build_pipeline
 from app.services.pipeline.transport.webrtc_transport import WebRTCTransport
+from app.utils.crud import (
+    get_agent_or_404,
+    get_call_or_404,
+    list_calls_paginated,
+    safe_add_and_commit,
+    safe_update_and_commit,
+)
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
@@ -84,10 +92,7 @@ async def dispatch_call(
     db: AsyncSession = Depends(get_db),
 ):
     """Dispatch an outbound voice call via Telnyx/Twilio."""
-    res = await db.execute(select(Agent).where(Agent.id == req.agent_id, Agent.org_id == org.id))
-    agent = res.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(req.agent_id, org.id, db, eager_load=False)
 
     call_run = CallRun(
         org_id=org.id,
@@ -98,9 +103,7 @@ async def dispatch_call(
         status="initiated",
         initial_context=req.custom_data or {},
     )
-    db.add(call_run)
-    await db.commit()
-    await db.refresh(call_run)
+    call_run = await safe_add_and_commit(db, call_run, "dispatch_call")
     return {"status": "dispatched", "call_run_id": call_run.id, "customer_number": req.customer_number}
 
 
@@ -112,10 +115,7 @@ async def create_web_call(
     db: AsyncSession = Depends(get_db),
 ):
     """Initiate a live WebRTC voice session."""
-    res = await db.execute(select(Agent).where(Agent.id == req.agent_id, Agent.org_id == org.id))
-    agent = res.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await get_agent_or_404(req.agent_id, org.id, db, eager_load=False)
 
     from app.core.security import create_access_token
     from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES
@@ -135,9 +135,7 @@ async def create_web_call(
         initial_context=req.metadata or {},
         started_at=datetime.now(UTC),
     )
-    db.add(call_run)
-    await db.commit()
-    await db.refresh(call_run)
+    call_run = await safe_add_and_commit(db, call_run, "create_web_call")
 
     return {
         "call_id": call_run.id,
@@ -152,16 +150,14 @@ async def end_call(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id))
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Call not found")
+    """End a call run."""
+    run = await get_call_or_404(call_id, org.id, db)
     if run.status in ("initiated", "running"):
         run.status = "completed"
         run.ended_at = datetime.now(UTC)
         if run.started_at:
             run.duration_seconds = (run.ended_at - run.started_at).total_seconds()
-        await db.commit()
+        await safe_update_and_commit(db, run, "end_call")
     return {"status": "ended", "call_id": run.id}
 
 
@@ -229,12 +225,8 @@ async def get_call(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id)
-    )
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Call not found")
+    """Get a specific call run."""
+    run = await get_call_or_404(call_id, org.id, db)
     return CallRunResponse(
         id=run.id,
         agent_id=run.agent_id,
@@ -264,12 +256,7 @@ async def get_call_analysis(
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve only the structured post-call analysis fields for a call run."""
-    result = await db.execute(
-        select(CallRun).where(CallRun.id == call_id, CallRun.org_id == org.id)
-    )
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Call not found")
+    run = await get_call_or_404(call_id, org.id, db)
     return CallAnalysisResponse(
         call_id=run.id,
         summary=run.summary,
