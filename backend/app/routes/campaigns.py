@@ -88,7 +88,24 @@ async def upload_contacts(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload contact numbers list via CSV file."""
+    """
+    Upload contact numbers list via CSV file.
+    
+    CSV format: phone_number, name
+    Example:
+    ```
+    phone_number,name
+    +1234567890,John Doe
+    +0987654321,Jane Smith
+    ```
+    
+    Constraints:
+    - Maximum file size: 5 MB
+    - Content-Type: text/csv
+    - At least 1 valid contact required
+    
+    Returns: {"message": "...", "count": 123}
+    """
     result = await db.execute(
         select(Campaign).where(Campaign.id == campaign_id, Campaign.org_id == org.id)
     )

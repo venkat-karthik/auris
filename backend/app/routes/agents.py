@@ -61,7 +61,22 @@ async def create_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new agent for the organization."""
+    """
+    Create a new agent for the organization.
+    
+    Request body example:
+    ```json
+    {
+        "name": "Support Agent",
+        "description": "Handles customer support calls",
+        "graph": {},
+        "model_config_data": {},
+        "context_variables": {}
+    }
+    ```
+    
+    Response: Agent object with auto-generated ID (201 Created)
+    """
     agent = Agent(
         org_id=org.id,
         created_by=user.id,
@@ -81,7 +96,26 @@ async def list_agents(
     limit: int = 50,
     offset: int = 0,
 ):
-    """List all active agents for the organization."""
+    """
+    List all active agents for the organization.
+    
+    Results are paginated with limit and offset.
+    
+    Example response:
+    ```json
+    [
+        {
+            "id": 1,
+            "org_id": 123,
+            "name": "Support Agent",
+            "description": "Customer support voice agent",
+            "graph": {},
+            "model_config": {},
+            "context_variables": {}
+        }
+    ]
+    ```
+    """
     agents = await list_agents_paginated(org.id, db, limit=limit, offset=offset)
     return agents
 
@@ -92,7 +126,12 @@ async def get_agent(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a specific agent by ID."""
+    """
+    Get a specific agent by ID.
+    
+    Returns 404 if agent not found.
+    Response includes X-Request-ID header for tracing.
+    """
     return await get_agent_or_404(agent_id, org.id, db, eager_load=True)
 
 

@@ -174,6 +174,21 @@ async def list_calls(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
 ):
+    """
+    List calls with filtering and pagination.
+    
+    Query parameters:
+    - limit: Page size (default: 50)
+    - offset: Pagination offset (default: 0)
+    - agent_id: Filter by agent
+    - status: Filter by status (initiated, running, completed, failed)
+    - call_type: Filter by type (inbound, outbound)
+    - disposition: Filter by disposition
+    - start_date: Filter calls created after this date
+    - end_date: Filter calls created before this date
+    
+    Response includes X-Request-ID header for request tracing.
+    """
     query = select(CallRun).where(CallRun.org_id == org.id)
     
     # Dynamic filtering
