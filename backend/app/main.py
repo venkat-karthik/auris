@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI):
     from app.core.config import SENTRY_DSN, ENVIRONMENT, CORS_ORIGINS
     from app.core.database import dispose_pool
     from app.core.config_validation import validate_config, log_config_summary
+    from app.services.task_manager import get_task_manager
     
     # Validate configuration on startup (fail fast)
     try:
@@ -65,7 +66,13 @@ async def lifespan(app: FastAPI):
     yield
     
     # ── Shutdown ──────────────────────────────────────────────────────────────
+    # Cancel all pending background tasks
+    task_manager = get_task_manager()
+    await task_manager.cancel_all()
+    
+    # Dispose database connections
     await dispose_pool()
+    
     logger.info(f"Shutting down {APP_NAME}")
 
 

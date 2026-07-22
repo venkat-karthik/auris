@@ -5,7 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.dependencies.auth import get_current_org, get_current_user
 from app.models.organization import Organization
 from app.models.campaign import Campaign, CampaignContact
@@ -170,24 +170,38 @@ async def start_campaign(
     campaign.status = "running"
     campaign = await safe_update_and_commit(db, campaign, "start_campaign")
 
-    # Enqueue dialing task on background worker with error handling
-    async def enqueue_with_error_handling():
+    # Enqueue dialing task with safe background task manager
+    from app.services.task_manager import safe_background_task
+    
+    async def enqueue_dialer():
         try:
             from arq import create_pool
             from arq.connections import RedisSettings
             from app.core.config import REDIS_URL
+            
             redis_settings = RedisSettings.from_dsn(REDIS_URL)
             pool = await create_pool(redis_settings)
-            # Enqueue outbound dialer task
             await pool.enqueue_job("dial_next_contacts", campaign_id)
             await pool.close()
             logger.info(f"Campaign {campaign_id} dialer task enqueued successfully")
         except Exception as e:
-            logger.error(f"Failed to enqueue campaign {campaign_id} dialer background task: {e}")
-            # Don't raise - campaign started but background job failed
-
-    import asyncio
-    asyncio.create_task(enqueue_with_error_handling())
+            logger.error(f"Failed to enqueue campaign {campaign_id} dialer task: {e}")
+            # Mark campaign as failed if queueing fails
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(Campaign).where(Campaign.id == campaign_id)
+                )
+                campaign_obj = result.scalar_one_or_none()
+                if campaign_obj:
+                    campaign_obj.status = "failed"
+                    await session.commit()
+    
+    # Launch background task with error handling
+    await safe_background_task(
+        enqueue_dialer(),
+        task_name=f"campaign_start_{campaign_id}",
+        on_error=None
+    )
 
     return campaign
 
