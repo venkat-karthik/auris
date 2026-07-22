@@ -1,0 +1,108 @@
+# Alertmanager Configuration for Auris
+# Routes alerts to different channels based on severity
+
+global:
+  resolve_timeout: 5m
+  # Configure your notification services here:
+  # slack_api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+  # pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+# The root route with all parameters, which are inherited by the child routes
+route:
+  # The labels by which incoming alerts are grouped together. For example,
+  # multiple alerts coming in for cluster=A and alertname=LatencyHigh would
+  # be batched into a single group.
+  group_by: ['alertname', 'cluster', 'service']
+  
+  # How long to initially wait to send a notification for a group of alerts.
+  group_wait: 10s
+  
+  # How long to wait before sending a notification about new alerts added to
+  # a group of alerts for which an initial notification has already been sent.
+  group_interval: 10s
+  
+  # How long to wait before sending a notification again if it has already
+  # been sent successfully for an alert. (Usually ~3h or more)
+  repeat_interval: 12h
+  
+  # The default receiver to use for alerts that do not match the child routes.
+  receiver: 'team-default'
+  
+  # Child routes
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      repeat_interval: 1m
+    
+    # Warning alerts - batch and send
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      repeat_interval: 4h
+    
+    # Info alerts - digest format
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+      group_wait: 5m
+      repeat_interval: 24h
+
+# Inhibition rules allow to mute a set of alerts given that another alert is
+# firing. We use this to mute any warning-level notifications if the same
+# alert is already critical.
+inhibit_rules:
+  # Mute warning if critical is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'dev', 'instance']
+  
+  # Mute info if warning is firing
+  - source_match:
+      severity: 'warning'
+    target_match:
+      severity: 'info'
+    equal: ['alertname', 'dev', 'instance']
+
+# Receivers configure where notifications are sent
+receivers:
+  # Default receiver (can be email, Slack, etc.)
+  - name: 'team-default'
+    # slack_configs:
+    #   - channel: '#alerts'
+    #     title: 'Auris Alert: {{ .GroupLabels.alertname }}'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+  # Critical alerts - page on-call, Slack urgent, PagerDuty
+  - name: 'critical-alerts'
+    # slack_configs:
+    #   - channel: '#critical-alerts'
+    #     title: '🔴 CRITICAL: {{ .GroupLabels.alertname }}'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    # pagerduty_configs:
+    #   - service_key: 'YOUR_PAGERDUTY_KEY'
+    #     description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.description }}'
+    #     severity: 'critical'
+
+  # Warning alerts - Slack channel
+  - name: 'warning-alerts'
+    # slack_configs:
+    #   - channel: '#warnings'
+    #     title: '⚠️  WARNING: {{ .GroupLabels.alertname }}'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+  # Info alerts - digest email
+  - name: 'info-alerts'
+    # email_configs:
+    #   - to: 'devops@example.com'
+    #     from: 'alertmanager@example.com'
+    #     smarthost: 'smtp.gmail.com:587'
+    #     auth_username: 'your-email@gmail.com'
+    #     auth_password: 'your-app-password'
+    #     headers:
+    #       Subject: 'Auris Info Alert: {{ .GroupLabels.alertname }}'
