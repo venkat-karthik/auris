@@ -41,9 +41,9 @@ from app.dependencies.rate_limit import check_rate_limit
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
     from app.core.config import SENTRY_DSN, ENVIRONMENT, CORS_ORIGINS
-    from app.core.database import dispose_pool
     from app.core.config_validation import validate_config, log_config_summary
     from app.services.task_manager import get_task_manager
+    from app.services.lifecycle_manager import setup_lifecycle_manager, get_lifecycle_manager
     
     # Validate configuration on startup (fail fast)
     try:
@@ -61,6 +61,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to initialize Sentry: {e}")
 
+    # Setup lifecycle manager with service hooks (Redis, database, etc.)
+    try:
+        lifecycle_manager = await setup_lifecycle_manager()
+        await lifecycle_manager.startup()
+    except Exception as e:
+        logger.error(f"Service startup failed: {e}")
+        raise
+
     logger.info(f"Starting {APP_NAME} v{APP_VERSION} [Environment: {ENVIRONMENT}]")
     
     yield
@@ -70,8 +78,12 @@ async def lifespan(app: FastAPI):
     task_manager = get_task_manager()
     await task_manager.cancel_all()
     
-    # Dispose database connections
-    await dispose_pool()
+    # Run service lifecycle shutdown (handles Redis, database, etc.)
+    try:
+        lifecycle_manager = get_lifecycle_manager()
+        await lifecycle_manager.shutdown()
+    except Exception as e:
+        logger.error(f"Service shutdown error: {e}")
     
     logger.info(f"Shutting down {APP_NAME}")
 
